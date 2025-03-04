@@ -4,6 +4,10 @@
 
 
 
+#variables 
+
+
+ref_transcriptome =/input/mosquito_transcriptome.fasta
 
 
 
