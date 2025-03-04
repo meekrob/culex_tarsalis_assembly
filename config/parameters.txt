@@ -1,0 +1,17 @@
+# Parameters for pipeline 
+
+
+# Slurm 
+partition = ""
+qos = ""
+
+
+
+# fastp
+time = 
+nodes =
+cpu-cores-per-task =
+
+# zcat
+
+
