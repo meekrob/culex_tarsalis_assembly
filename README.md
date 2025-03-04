@@ -4,7 +4,27 @@
 
 
 ### Pipeline Visualization
-   ![Pipeline visualization](simple_mosquito_denovo.png)
+   ![Pipeline visualization](config/simple_mosquito_denovo.png)
+
+
+#### Steps to run pipeline: 
+
+1. Clone and navigate into the repo
+```
+git clone git@github.com:meekrob/mosquito_denovo.git
+cd mosquito_denovo.git
+```
+2. Create the conda env 
+```
+conda create -f config/mosquito.yml
+```
+3. Run the main script
+```
+sbatch scripts/main_mosquito.sh
+```
+
+***Note*** - the rna files and reference transcriptome need to be added to input directories & the slurm parameters may need to configured in the config/parameters.txt 
+
 
 
 ### Project Structure:
@@ -39,4 +59,5 @@ mosquito_denovo/
 - **fastp**: Trim and perform quality control
 - **rnaSPAdes**: De novo transcriptome assembly
 - **BUSCO**: Transcriptome assembly quality assessment
+- **rnaQuast**: Transcriptome assembly quality assessment
 - **R**: Visualization and comparison graphs
