@@ -4,7 +4,7 @@
 
 
 ### Pipeline Visualization
-   ![Pipeline visualization](simple_mosquito_denovo_pipeline.png)
+   ![Pipeline visualization](simple_mosquito_denovo.png)
 
 
 ### Project Structure:
@@ -15,7 +15,7 @@ mosquito_denovo/
 │   └── draft_transcriptome/         # Original "best" transcriptome
 │
 ├── results/                         # Output files from each step of the pipeline
-│   ├── 01_merge_trim/               # Results from merging and trimming steps
+│   ├── 01_trim/               # Results from merging and trimming steps
 │   ├── 02_assembly/                 # De novo assembly results
 │   ├── 03_busco_rnaQuast/           # Completness analysis outputs
 │   └── 04_visualize/                # Visualization outputs and comparison graphs
