@@ -1,4 +1,6 @@
-# mosquito_denovo
+# cellSquito
+
+## denovo mosquito transcriptome assembly pipeline
 
 ### Goal: Build a higher quality transcriptome pipeline to improve the reference transcriptome
 
@@ -12,15 +14,15 @@
 1. Clone and navigate into the repo
 ```
 git clone git@github.com:meekrob/mosquito_denovo.git
-cd mosquito_denovo.git
+cd cellSquito
 ```
 2. Create the conda env 
 ```
-conda create -f config/mosquito.yml
+conda create -f config/cellSquito.yml -n cellSquito
 ```
 3. Run the main script
 ```
-sbatch scripts/main_mosquito.sh
+sbatch scripts/main.sh
 ```
 
 ***Note*** - the rna files and reference transcriptome need to be added to input directories & the slurm parameters may need to configured in the config/parameters.txt 
@@ -50,7 +52,7 @@ mosquito_denovo/
 ├── logs/                            # Directory to store .out & .err logs
 │
 └── configs/
-    ├── mosquito.yml                 # Conda environment specification
+    ├── cellSquito.yml                 # Conda environment specification
     └── data.tsv                     # Metadata table
 
 
