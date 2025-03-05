@@ -2,35 +2,36 @@
 # parameters are taken from jobscripts templates
 
 
-# Global SLURM parameters
-#partition=general
-#qos=normal
-
 # fastp job parameters
+fastp.partition=short-cpu
 fastp.time=01:00:00
 fastp.nodes=1
 fastp.cpu-cores-per-task=17
 fastp.mem=8G
 
 # cat job parameters
+cat.partition=short-cpu
 cat.time=01:00:00
 cat.nodes=1
 cat.cpu-cores-per-task=2
 cat.mem=16G
 
 # rnaSpades job parameters
+rnaSpades.partition=week-long-highmem
 rnaSpades.time=7:00:00:00
 rnaSpades.nodes=2
 rnaSpades.cpu-cores-per-task=32
 rnaSpades.mem=250GB 	# Might need more 
 
-# Busco job parameters
-Busco.time=01:00:00
-Busco.nodes=1
-Busco.cpu-cores-per-task=24
-Busco.mem=32G
+# busco job parameters
+busco.partition=short-cpu
+busco.time=01:00:00
+busco.nodes=1
+busco.cpu-cores-per-task=24
+busco.mem=32G
 
 # rnaQuast job parameters
+rnaQuast.partition=short-cpu
 rnaQuast.time=01:00:00
 rnaQuast.nodes=1
 rnaQuast.cpu-cores-per-task=24

@@ -1,4 +1,4 @@
-name: mosquito
+name: cellSquito
 channels:
   - bioconda
   - conda-forge
