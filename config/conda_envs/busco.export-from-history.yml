@@ -1,0 +1,10 @@
+name: busco
+channels:
+  - defaults
+  - conda-forge
+  - bioconda
+dependencies:
+  - busco
+  - python=3.9
+  - rnaquast
+prefix: /nfs/home/dking/miniconda3/envs/busco
