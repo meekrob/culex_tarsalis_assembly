@@ -1,8 +1,8 @@
 #! /bin/bash
 
 # slurm parameters, see config/parameters.txt
-#SBATCH --partition=medium-cpu
-#SBATCH --time=7:00:00:00
+#SBATCH --partition=week-long-highmem
+#SBATCH --time=168:00:00  # Changed from 7-00:00:00 to 168:00:00 (7 days in hours)
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=250G

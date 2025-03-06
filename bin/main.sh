@@ -85,12 +85,14 @@ sample_names=(
 # Submit trimming jobs for each sample
 trim_job_ids=()
 for sample_name in "${sample_names[@]}"; do
-    r1="${data_base}/raw/${sample_name}_R1.fastq.gz"
-    r2="${data_base}/raw/${sample_name}_R2.fastq.gz"
+    r1="${data_base}/raw_reads/${sample_name}_R1_001.fastq.gz"
+    r2="${data_base}/raw_reads/${sample_name}_R2_001.fastq.gz"
     
     # Skip if input files don't exist
     if [[ ! -f "$r1" || ! -f "$r2" ]]; then
         echo "Warning: Input files not found for $sample_name, skipping."
+        echo "  Looked for: $r1"
+        echo "  Looked for: $r2"
         continue
     fi
     
