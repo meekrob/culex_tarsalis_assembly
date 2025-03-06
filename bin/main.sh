@@ -149,8 +149,8 @@ fi
 
 echo "Found ${#samples[@]} paired samples to process"
 
-# Step 2: Submit trimming jobs
-echo "Submitting trimming jobs..."
+# Step 2: Submit separate merge jobs for R1 and R2
+echo "Submitting separate merge jobs for R1 and R2..."
 
 # Create lists for merged files
 r1_trimmed_list="$temp_dir/r1_trimmed.txt"
@@ -187,9 +187,6 @@ for ((i=0; i<${#samples[@]}; i++)); do
     fi
 done
 
-# Step 3: Submit merging job
-echo "Submitting merging job..."
-
 # Set output files for merging
 merged_r1="${merged_dir}/merged_R1.fastq.gz"
 merged_r2="${merged_dir}/merged_R2.fastq.gz"
@@ -200,22 +197,36 @@ if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
     merge_dependency="--dependency=afterany:"$(IFS=:; echo "${trim_job_ids[*]}")
 fi
 
-# Submit merge job
-merge_cmd="sbatch --parsable --job-name=merge ${merge_dependency} --output=${merge_logs}/merge_%j.out --error=${merge_logs}/merge_%j.err"
-merge_job_id=$(eval $merge_cmd bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$debug_mode")
+# Submit R1 merge job
+merge_r1_cmd="sbatch --parsable --job-name=merge_r1 --output=${merge_logs}/merge_r1_%j.out --error=${merge_logs}/merge_r1_%j.err $merge_dependency"
+merge_r1_job_id=$(eval $merge_r1_cmd bin/02_merge.sh "$r1_trimmed_list" "$merged_r1" "R1" "$merge_logs" "$debug_mode" "$summary_file")
 
-if [[ -n "$merge_job_id" ]]; then
-    echo "Submitted merging job: $merge_job_id"
+if [[ -n "$merge_r1_job_id" ]]; then
+    echo "Submitted R1 merge job: $merge_r1_job_id"
 else
-    echo "Error: Failed to submit merging job"
+    echo "Error: Failed to submit R1 merge job"
     exit 1
 fi
+
+# Submit R2 merge job
+merge_r2_cmd="sbatch --parsable --job-name=merge_r2 --output=${merge_logs}/merge_r2_%j.out --error=${merge_logs}/merge_r2_%j.err $merge_dependency"
+merge_r2_job_id=$(eval $merge_r2_cmd bin/02_merge.sh "$r2_trimmed_list" "$merged_r2" "R2" "$merge_logs" "$debug_mode" "$summary_file")
+
+if [[ -n "$merge_r2_job_id" ]]; then
+    echo "Submitted R2 merge job: $merge_r2_job_id"
+else
+    echo "Error: Failed to submit R2 merge job"
+    exit 1
+fi
+
+# Make assembly job dependent on both merge jobs
+assembly_dependency="--dependency=afterok:${merge_r1_job_id}:${merge_r2_job_id}"
 
 # Step 4: Submit assembly job
 echo "Submitting assembly job..."
 
 # Submit assembly job
-assembly_cmd="sbatch --parsable --job-name=assembly --output=${assembly_logs}/assembly_%j.out --error=${assembly_logs}/assembly_%j.err --dependency=afterok:${merge_job_id}"
+assembly_cmd="sbatch --parsable --job-name=assembly --output=${assembly_logs}/assembly_%j.out --error=${assembly_logs}/assembly_%j.err $assembly_dependency"
 assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "$assembly_logs" "$debug_mode" "$summary_file")
 
 if [[ -n "$assembly_job_id" ]]; then
@@ -266,7 +277,7 @@ fi
 
 echo "All jobs submitted. Pipeline will run with the following job IDs:"
 echo "  Trimming: ${trim_job_ids[*]}"
-echo "  Merging: $merge_job_id"
+echo "  Merging: $merge_r1_job_id, $merge_r2_job_id"
 echo "  Assembly: $assembly_job_id"
 echo "  BUSCO: $busco_job_id"
 echo "  rnaQuast: $rnaquast_job_id"
