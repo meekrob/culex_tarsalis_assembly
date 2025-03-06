@@ -97,39 +97,43 @@ for sample_name in "${sample_names[@]}"; do
         continue
     fi
     
-    trimmed_r1="${trimmed_dir}/${sample_name}_R1_trimmed.fastq.gz"
-    trimmed_r2="${trimmed_dir}/${sample_name}_R2_trimmed.fastq.gz"
+    # Define output files
+    out_r1="${trimmed_dir}/${sample_name}_R1_trimmed.fastq.gz"
+    out_r2="${trimmed_dir}/${sample_name}_R2_trimmed.fastq.gz"
     
     # Submit trimming job
     trim_job_id=$(sbatch --parsable \
-                --partition="${fastp_partition}" \
-                --time="${fastp_time}" \
-                --nodes=${fastp_nodes} \
-                --cpus-per-task=${fastp_cpu_cores_per_task} \
-                --mem="${fastp_mem}" \
-                --output="${trim_logs}/fastp_%j.out" \
-                --error="${trim_logs}/fastp_%j.err" \
-                bin/01_fastp.sh "$r1" "$r2" "$trimmed_r1" "$trimmed_r2" "$sample_name" "$trim_logs" "$debug_mode")
+                 --job-name="fastp_${sample_name}" \
+                 --output="${trim_logs}/fastp_${sample_name}_%j.out" \
+                 --error="${trim_logs}/fastp_${sample_name}_%j.err" \
+                 bin/01_fastp.sh "$r1" "$r2" "$out_r1" "$out_r2" "$sample_name" "$trim_logs" "$debug_mode")
     
-    trim_job_ids+=($trim_job_id)
-    echo "Submitted trimming job for $sample_name: $trim_job_id"
+    # Add job ID to array if successful
+    if [[ -n "$trim_job_id" ]]; then
+        trim_job_ids+=($trim_job_id)
+        echo "Submitted trimming job for $sample_name: $trim_job_id"
+    else
+        echo "Error: Failed to submit trimming job for $sample_name"
+    fi
 done
 
-# Create dependency string for all trimming jobs
-trim_dependency=""
+# Create dependency string for merge job
 if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-    trim_dependency="afterany:$(IFS=:; echo "${trim_job_ids[*]}")"
+    trim_dependency="--dependency=afterany:$(IFS=:; echo "${trim_job_ids[*]}")"
+else
+    trim_dependency=""
+    echo "Warning: No trimming jobs submitted. Merge job will run without dependencies."
 fi
 
 # Create lists of trimmed files for merging
 r1_trimmed_list="${temp_dir}/r1_trimmed_files.txt"
 r2_trimmed_list="${temp_dir}/r2_trimmed_files.txt"
 
-# Clear existing lists if they exist
+# Clear existing lists
 > "$r1_trimmed_list"
 > "$r2_trimmed_list"
 
-# Add all trimmed files to the lists
+# Add trimmed files to lists
 for sample_name in "${sample_names[@]}"; do
     trimmed_r1="${trimmed_dir}/${sample_name}_R1_trimmed.fastq.gz"
     trimmed_r2="${trimmed_dir}/${sample_name}_R2_trimmed.fastq.gz"
@@ -153,74 +157,62 @@ merged_r1="${merged_dir}/all_samples_R1.fastq.gz"
 merged_r2="${merged_dir}/all_samples_R2.fastq.gz"
 
 # Submit merge job
-merge_job_id=$(sbatch --parsable \
-              --partition="${cat_partition}" \
-              --time="${cat_time}" \
-              --nodes=${cat_nodes} \
-              --cpus-per-task=${cat_cpu_cores_per_task} \
-              --mem="${cat_mem}" \
-              --output="${merge_logs}/merge_%j.out" \
-              --error="${merge_logs}/merge_%j.err" \
-              --dependency=$trim_dependency \
-              bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$debug_mode")
+merge_cmd="sbatch --parsable --job-name=merge --output=${merge_logs}/merge_%j.out --error=${merge_logs}/merge_%j.err"
+if [[ -n "$trim_dependency" ]]; then
+    merge_cmd="$merge_cmd $trim_dependency"
+fi
+merge_job_id=$(eval $merge_cmd bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$debug_mode")
 
-echo "Submitted merge job: $merge_job_id"
+if [[ -n "$merge_job_id" ]]; then
+    echo "Submitted merge job: $merge_job_id"
+else
+    echo "Error: Failed to submit merge job"
+    exit 1
+fi
 
 # Submit assembly job
-assembly_job_id=$(sbatch --parsable \
-                --partition="${rnaSpades_partition}" \
-                --time="${rnaSpades_time}" \
-                --nodes=${rnaSpades_nodes} \
-                --cpus-per-task=${rnaSpades_cpu_cores_per_task} \
-                --mem="${rnaSpades_mem}" \
-                --output="${assembly_logs}/assembly_%j.out" \
-                --error="${assembly_logs}/assembly_%j.err" \
-                --dependency=afterany:${merge_job_id} \
-                bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "$assembly_logs" "$debug_mode")
+assembly_cmd="sbatch --parsable --job-name=rnaspades --output=${assembly_logs}/assembly_%j.out --error=${assembly_logs}/assembly_%j.err --dependency=afterany:${merge_job_id}"
+assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "$assembly_logs" "$debug_mode")
 
-echo "Submitted assembly job: $assembly_job_id"
+if [[ -n "$assembly_job_id" ]]; then
+    echo "Submitted assembly job: $assembly_job_id"
+else
+    echo "Error: Failed to submit assembly job"
+    exit 1
+fi
 
 # Submit BUSCO job
-busco_job_id=$(sbatch --parsable \
-              --partition="${busco_partition}" \
-              --time="${busco_time}" \
-              --nodes=${busco_nodes} \
-              --cpus-per-task=${busco_cpu_cores_per_task} \
-              --mem="${busco_mem}" \
-              --output="${busco_logs}/busco_%j.out" \
-              --error="${busco_logs}/busco_%j.err" \
-              --dependency=afterany:${assembly_job_id} \
-              bin/04_busco.sh "$assembly_dir/transcripts.fasta" "$busco_dir" "$busco_logs" "$debug_mode")
+busco_cmd="sbatch --parsable --job-name=busco --output=${busco_logs}/busco_%j.out --error=${busco_logs}/busco_%j.err --dependency=afterany:${assembly_job_id}"
+busco_job_id=$(eval $busco_cmd bin/04_busco.sh "$assembly_dir/transcripts.fasta" "$busco_dir" "$busco_logs" "$debug_mode")
 
-echo "Submitted BUSCO job: $busco_job_id"
+if [[ -n "$busco_job_id" ]]; then
+    echo "Submitted BUSCO job: $busco_job_id"
+else
+    echo "Error: Failed to submit BUSCO job"
+    exit 1
+fi
 
 # Submit rnaQuast job
-rnaquast_job_id=$(sbatch --parsable \
-                --partition="${rnaQuast_partition}" \
-                --time="${rnaQuast_time}" \
-                --nodes=${rnaQuast_nodes} \
-                --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
-                --mem="${rnaQuast_mem}" \
-                --output="${rnaquast_logs}/rnaquast_%j.out" \
-                --error="${rnaquast_logs}/rnaquast_%j.err" \
-                --dependency=afterany:${assembly_job_id} \
-                bin/04_rnaquast.sh "$assembly_dir/transcripts.fasta" "$rnaquast_dir" "$rnaquast_logs" "$debug_mode")
+rnaquast_cmd="sbatch --parsable --job-name=rnaquast --output=${rnaquast_logs}/rnaquast_%j.out --error=${rnaquast_logs}/rnaquast_%j.err --dependency=afterany:${assembly_job_id}"
+rnaquast_job_id=$(eval $rnaquast_cmd bin/04_rnaquast.sh "$assembly_dir/transcripts.fasta" "$rnaquast_dir" "$rnaquast_logs" "$debug_mode")
 
-echo "Submitted rnaQuast job: $rnaquast_job_id"
+if [[ -n "$rnaquast_job_id" ]]; then
+    echo "Submitted rnaQuast job: $rnaquast_job_id"
+else
+    echo "Error: Failed to submit rnaQuast job"
+    exit 1
+fi
 
 # Submit visualization job
-viz_job_id=$(sbatch --parsable \
-            --partition="${visualize_partition}" \
-            --time="${visualize_time}" \
-            --nodes=${visualize_nodes} \
-            --cpus-per-task=${visualize_cpu_cores_per_task} \
-            --mem="${visualize_mem}" \
-            --output="${viz_logs}/viz_%j.out" \
-            --error="${viz_logs}/viz_%j.err" \
-            --dependency=afterany:${busco_job_id}:${rnaquast_job_id} \
-            bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$viz_logs" "$debug_mode")
+viz_cmd="sbatch --parsable --job-name=visualize --output=${viz_logs}/viz_%j.out --error=${viz_logs}/viz_%j.err --dependency=afterany:${busco_job_id}:${rnaquast_job_id}"
+viz_job_id=$(eval $viz_cmd bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$viz_logs" "$debug_mode")
 
-echo "Submitted visualization job: $viz_job_id"
+if [[ -n "$viz_job_id" ]]; then
+    echo "Submitted visualization job: $viz_job_id"
+else
+    echo "Error: Failed to submit visualization job"
+    exit 1
+fi
 
 echo "All jobs submitted. Pipeline will run with the following job IDs:"
 echo "  Trimming: ${trim_job_ids[*]}"
@@ -229,3 +221,9 @@ echo "  Assembly: $assembly_job_id"
 echo "  BUSCO: $busco_job_id"
 echo "  rnaQuast: $rnaquast_job_id"
 echo "  Visualization: $viz_job_id"
+
+# Calculate total runtime
+end_time=$(date +%s)
+total_runtime=$((end_time - start_time))
+echo "Pipeline setup completed in $total_runtime seconds"
+echo "Check job status with: squeue -u $USER"
