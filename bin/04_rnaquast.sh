@@ -2,65 +2,101 @@
 
 # slurm parameters, see config/parameters.txt
 #SBATCH --partition=short-cpu
-#SBATCH --time=01:00:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=24
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --job-name=rnaquast
 # Log files will be specified when submitting the job
 
-# Source configuration
-source config/parameters.txt
-
 # input file variables passed in as arguments from main_mosquito.sh
-ASSEMBLY=$1  # Path to the assembly fasta file
-OUT=$2       # Output directory
-left=$3      # R1 fastq file for read mapping
-right=$4     # R2 fastq file for read mapping
-other_opts=${5:-"${rnaQuast.opts}"}  # Additional options for rnaQuast
+TX_FASTA=$1    # Transcriptome fasta file
+OUT=$2         # Output directory
+LEFT=$3        # Left reads (for read mapping)
+RIGHT=$4       # Right reads (for read mapping)
+OPTS=${5:-""}  # Additional options for rnaQuast
 LOG_DIR=${6:-"logs/04_rnaquast"}  # Directory for logs
+SUMMARY_FILE=${7:-"logs/pipeline_summary.csv"}  # Summary file path
+DEBUG_MODE=${8:-false}  # Debug mode flag
 
-# Create necessary directories
+# Create output directory if it doesn't exist
 mkdir -p $OUT
 mkdir -p $LOG_DIR
+
+# Debug mode: Check if output files already exist
+if [[ "$DEBUG_MODE" == "true" && -s "$OUT/report.txt" ]]; then
+    echo "Debug mode: rnaQuast report already exists: $OUT/report.txt. Skipping rnaQuast analysis."
+    
+    # Add entry to summary file
+    echo "rnaQuast,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    
+    # Extract key metrics from the report file
+    if [[ -f "$OUT/report.txt" ]]; then
+        transcripts=$(grep "^Transcripts" "$OUT/report.txt" | awk '{print $NF}')
+        total_length=$(grep "^Total length" "$OUT/report.txt" | head -n 1 | awk '{print $NF}')
+        n50=$(grep "^Transcript N50" "$OUT/report.txt" | awk '{print $NF}')
+        
+        echo "rnaQuast,,Transcripts,$transcripts" >> "$SUMMARY_FILE"
+        echo "rnaQuast,,Total Length,$total_length" >> "$SUMMARY_FILE"
+        echo "rnaQuast,,N50,$n50" >> "$SUMMARY_FILE"
+    fi
+    
+    exit 0
+fi
 
 # activate conda env
 source ~/.bashrc
 conda activate cellSquito
 
 echo "Starting rnaQuast analysis"
-echo "Input assembly: $ASSEMBLY"
+echo "Transcriptome: $TX_FASTA"
 echo "Output directory: $OUT"
-echo "Input R1: $left"
-echo "Input R2: $right"
-echo "Additional options: $other_opts"
+echo "Left reads: $LEFT"
+echo "Right reads: $RIGHT"
+echo "Additional options: $OPTS"
 
-# Check if input files exist
-if [[ ! -f "$ASSEMBLY" ]]; then
-    echo "Error: Assembly file $ASSEMBLY not found!"
-    exit 1
+# run rnaQuast on the assembly from rnaspades using configurable parameters
+cmd="rnaQUAST.py --transcripts $TX_FASTA --output_dir $OUT --threads $SLURM_CPUS_PER_TASK"
+
+# Add read mapping if reads are provided
+if [[ -n "$LEFT" && -n "$RIGHT" && -f "$LEFT" && -f "$RIGHT" ]]; then
+    cmd="$cmd --left $LEFT --right $RIGHT"
 fi
 
-if [[ ! -f "$left" || ! -f "$right" ]]; then
-    echo "Error: Read files not found!"
-    exit 1
+# Add any additional options
+if [[ -n "$OPTS" ]]; then
+    cmd="$cmd $OPTS"
 fi
 
-# run rnaquast on the assembly from rnaspades
-cmd="rnaquast.py --transcripts $ASSEMBLY -t ${rnaQuast_threads} -o $OUT -1 $left -2 $right $other_opts"
 echo "Executing command: $cmd"
 time eval $cmd
 
-# Check if rnaQuast completed successfully
-if [[ -f "$OUT/report.pdf" || -f "$OUT/report.html" ]]; then
-    echo "rnaQuast analysis completed successfully!"
-    echo "rnaQuast summary:"
-    cat $OUT/report.txt
-else
-    echo "Error: rnaQuast analysis failed or report files not found!"
+# Check if rnaQuast was successful
+if [[ $? -ne 0 ]]; then
+    echo "Error: rnaQuast failed!" >&2
+    echo "rnaQuast,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 
-# store results in results/04_quality_analysis
+# Check if output files were created
+if [[ ! -s "$OUT/report.txt" ]]; then
+    echo "Error: rnaQuast report file is missing or empty!" >&2
+    echo "rnaQuast,,Status,Failed (missing output)" >> "$SUMMARY_FILE"
+    exit 1
+fi
 
-# output error and log files to logs directory rnaquast_jobid. err and .out respectively
+echo "rnaQuast analysis completed successfully!"
+
+# Extract key metrics from the report file
+transcripts=$(grep "^Transcripts" "$OUT/report.txt" | awk '{print $NF}')
+total_length=$(grep "^Total length" "$OUT/report.txt" | head -n 1 | awk '{print $NF}')
+n50=$(grep "^Transcript N50" "$OUT/report.txt" | awk '{print $NF}')
+
+# Add rnaQuast statistics to summary file
+echo "rnaQuast,,Status,Completed" >> "$SUMMARY_FILE"
+echo "rnaQuast,,Transcripts,$transcripts" >> "$SUMMARY_FILE"
+echo "rnaQuast,,Total Length,$total_length" >> "$SUMMARY_FILE"
+echo "rnaQuast,,N50,$n50" >> "$SUMMARY_FILE"
+
+echo "rnaQuast results saved to $OUT"
+echo "rnaQuast report file: $OUT/report.txt"

@@ -17,16 +17,22 @@ raw_reads_dir="${current_dir}/data/raw_reads"
 result_base="${current_dir}/results"
 logs_base="${current_dir}/logs"  # Changed to be at the same level as results
 draft_transcriptome=""
+debug_mode=false
 
 # Parse command line arguments
-while getopts ":R:h" opt; do
+while getopts ":R:dh" opt; do
   case ${opt} in
     R )
       draft_transcriptome=$OPTARG
       ;;
+    d )
+      debug_mode=true
+      echo "Debug mode enabled: Will check for existing output files and skip completed steps."
+      ;;
     h )
-      echo "Usage: $0 [-R /path/to/reference/transcriptome] [raw_reads_dir] [result_base] [logs_base]"
+      echo "Usage: $0 [-R /path/to/reference/transcriptome] [-d] [raw_reads_dir] [result_base] [logs_base]"
       echo "  -R: Path to reference transcriptome (optional)"
+      echo "  -d: Debug mode - check for existing output files and skip completed steps"
       echo "  raw_reads_dir: Directory with raw fastq files (default: ./data/raw_reads)"
       echo "  result_base: Base directory for all results (default: ./results)"
       echo "  logs_base: Base directory for all logs (default: ./logs)"
@@ -95,6 +101,12 @@ mkdir -p "$trimmed_dir" "$merged_dir" "$assembly_dir" "$busco_dir" "$rnaquast_di
 mkdir -p "$trim_logs" "$merge_logs" "$assembly_logs" "$busco_logs" "$rnaquast_logs" \
          "$viz_logs" "$summary_logs"
 
+# Create summary file
+SUMMARY_FILE="${logs_base}/pipeline_summary.csv"
+echo "Step,Sample,Metric,Value" > "$SUMMARY_FILE"
+echo "Pipeline,Info,Start Time,$(date)" >> "$SUMMARY_FILE"
+echo "Pipeline,Info,Working Directory,$current_dir" >> "$SUMMARY_FILE"
+
 # Create temporary directory for file lists
 temp_dir="${result_base}/temp"
 mkdir -p "$temp_dir"
@@ -103,11 +115,36 @@ r2_trimmed_list="${temp_dir}/r2_trimmed_files.txt"
 > "$r1_trimmed_list"  # Clear contents
 > "$r2_trimmed_list"  # Clear contents
 
+# Function to check job status
+check_job_status() {
+    local job_id=$1
+    local job_name=$2
+    local max_attempts=5
+    local attempt=1
+    local wait_time=2
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        if squeue -j "$job_id" &>/dev/null; then
+            echo "Job $job_name (ID: $job_id) is in the queue."
+            return 0
+        fi
+        echo "Attempt $attempt: Job $job_name (ID: $job_id) not found in queue. Waiting ${wait_time}s..."
+        sleep $wait_time
+        wait_time=$((wait_time * 2))  # Exponential backoff
+        attempt=$((attempt + 1))
+    done
+    
+    echo "Warning: Job $job_name (ID: $job_id) not found in queue after $max_attempts attempts."
+    return 1
+}
+
 # Print pipeline information
 echo "===== Mosquito RNA-Seq Pipeline ====="
 echo "Raw reads directory: $raw_reads_dir"
 echo "Results directory: $result_base"
 echo "Log files: $logs_base"
+echo "Debug mode: $debug_mode"
+echo "Summary file: $SUMMARY_FILE"
 echo "======================================="
 
 # Step 1: Identify read pairs
@@ -123,77 +160,54 @@ if [[ -z "$(ls -A $raw_reads_dir)" ]]; then
     exit 1
 fi
 
-# Function to check job status
-check_job_status() {
-    local job_id=$1
-    local job_name=$2
-    
-    # Wait a moment for the job to be registered in the system
-    sleep 2
-    
-    # Check if job exists
-    if ! scontrol show job $job_id &>/dev/null; then
-        echo "Error: Job $job_id ($job_name) does not exist or was cancelled!"
-        return 1
-    fi
-    
-    # Check job state
-    local state=$(scontrol show job $job_id | grep JobState | awk '{print $1}' | cut -d= -f2)
-    if [[ "$state" == "FAILED" ]]; then
-        echo "Error: Job $job_id ($job_name) failed!"
-        return 1
-    fi
-    
-    return 0
+# Arrays to store paired files
+declare -a r1_files_array
+declare -a r2_files_array
+declare -a samples
+
+# Function to extract sample name from filename
+extract_sample_name() {
+    local filename=$(basename "$1")
+    # Remove common suffixes and extensions
+    local sample=${filename%%_R1*}
+    sample=${sample%%_1*}
+    sample=${sample%%_r1*}
+    echo "$sample"
 }
 
-# Pairing read files based on naming patterns
 echo "Pairing read files based on naming patterns..."
-samples=()
-r1_files_array=()
-r2_files_array=()
 paired_found=0
 
-# Common naming patterns for paired-end reads
-patterns=(
-    "_R1_001.fastq.gz:_R2_001.fastq.gz"
-    "_R1.fastq.gz:_R2.fastq.gz"
-    "_1.fastq.gz:_2.fastq.gz"
-    "_1.fq.gz:_2.fq.gz"
-    "_R1.fq.gz:_R2.fq.gz"
-)
+# Find all potential R1 files with various naming conventions
+r1_files=$(find "$raw_reads_dir" -type f -name "*_R1_*.fastq*" -o -name "*_R1.fastq*" -o -name "*_1.fastq*" -o -name "*_r1.fastq*" -o -name "*_r1_*.fastq*" | sort)
 
-# Find all potential R1 files
-r1_files=$(find "$raw_reads_dir" -type f -name "*R1*.fastq.gz" -o -name "*_1.fastq.gz" -o -name "*_1.fq.gz" -o -name "*R1*.fq.gz")
-
-for r1_file in $r1_files; do
-    for pattern in "${patterns[@]}"; do
-        r1_suffix=$(echo $pattern | cut -d: -f1)
-        r2_suffix=$(echo $pattern | cut -d: -f2)
-        
-        if [[ "$r1_file" == *"$r1_suffix" ]]; then
-            # Construct the expected R2 filename
-            r2_file="${r1_file/$r1_suffix/$r2_suffix}"
-            
-            # Check if the R2 file exists
-            if [[ -f "$r2_file" ]]; then
-                # Extract sample name from filename
-                base_name=$(basename "$r1_file" "$r1_suffix")
-                samples+=("$base_name")
-                r1_files_array+=("$r1_file")
-                r2_files_array+=("$r2_file")
-                paired_found=$((paired_found + 1))
-                break  # Found a matching pattern, move to the next file
-            fi
-        fi
-    done
+# For each R1 file, find its corresponding R2 file
+for r1 in $r1_files; do
+    # Try different R2 naming patterns
+    r2=${r1/_R1_/_R2_}
+    r2=${r2/_R1./_R2.}
+    r2=${r2/_1./_2.}
+    r2=${r2/_r1./_r2.}
+    r2=${r2/_r1_/_r2_}
+    
+    # Check if R2 exists
+    if [[ -f "$r2" ]]; then
+        sample=$(extract_sample_name "$r1")
+        r1_files_array+=("$r1")
+        r2_files_array+=("$r2")
+        samples+=("$sample")
+        paired_found=$((paired_found + 1))
+        echo "  Paired: $sample"
+        echo "    R1: $r1"
+        echo "    R2: $r2"
+    else
+        echo "  Warning: Could not find R2 pair for $r1"
+    fi
 done
 
 echo "Found $paired_found paired read files:"
 for ((i=0; i<${#samples[@]}; i++)); do
-    echo "  Sample: ${samples[$i]}"
-    echo "    R1: ${r1_files_array[$i]}"
-    echo "    R2: ${r2_files_array[$i]}"
+    echo "  ${samples[$i]}: ${r1_files_array[$i]} + ${r2_files_array[$i]}"
 done
 
 if [[ $paired_found -eq 0 ]]; then
@@ -218,6 +232,14 @@ for ((i=0; i<${#samples[@]}; i++)); do
     echo "$trim_r1" >> $r1_trimmed_list
     echo "$trim_r2" >> $r2_trimmed_list
     
+    # Check if files already exist in debug mode
+    if [[ "$debug_mode" == "true" && -s "$trim_r1" && -s "$trim_r2" ]]; then
+        echo "Debug mode: Trimmed files already exist for sample $sample. Skipping trimming job."
+        # Add entry to summary file
+        echo "Trimming,$sample,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+        continue
+    fi
+    
     echo "Submitting trimming job for sample $sample"
     # Submit trimming job with specific log directory and files
     job_id=$(sbatch --parsable \
@@ -228,7 +250,7 @@ for ((i=0; i<${#samples[@]}; i++)); do
              --mem="${fastp_mem}" \
              --output="${trim_logs}/trim_${sample}_%j.out" \
              --error="${trim_logs}/trim_${sample}_%j.err" \
-             bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$trim_logs")
+             bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$trim_logs" "$SUMMARY_FILE" "$debug_mode")
     
     # Check if job submission was successful
     if [[ $? -ne 0 || -z "$job_id" ]]; then
@@ -236,236 +258,376 @@ for ((i=0; i<${#samples[@]}; i++)); do
         exit 1
     fi
     
+    trim_job_ids+=($job_id)
+    echo "  Job ID: $job_id"
+    
     # Verify job was submitted correctly
     if ! check_job_status "$job_id" "trim_${sample}"; then
         echo "Warning: Job verification failed for trimming job $job_id"
         # Continue anyway, as the job might still be in queue
     fi
     
-    trim_job_ids+=($job_id)
-    echo "  Job ID: $job_id"
+    # Add a short delay to prevent overwhelming the scheduler
+    sleep 1
 done
 
-# Wait a moment to ensure all jobs are registered
-sleep 5
+# If no trimming jobs were submitted in debug mode, check if we have all the files we need
+if [[ "$debug_mode" == "true" && ${#trim_job_ids[@]} -eq 0 ]]; then
+    echo "Debug mode: All trimming jobs skipped. Checking if all required trimmed files exist..."
+    all_files_exist=true
+    for ((i=0; i<${#samples[@]}; i++)); do
+        sample="${samples[$i]}"
+        trim_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq"
+        trim_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq"
+        
+        if [[ ! -s "$trim_r1" || ! -s "$trim_r2" ]]; then
+            echo "Error: Missing trimmed files for sample $sample in debug mode."
+            all_files_exist=false
+            break
+        fi
+    done
+    
+    if [[ "$all_files_exist" == "false" ]]; then
+        echo "Error: Cannot proceed in debug mode without all trimmed files."
+        exit 1
+    fi
+fi
 
 # Step 2.2: Submit merging job (depends on all trimming jobs)
 echo "Preparing to submit merging job..."
-# Create dependency string for merge job to wait for all trimming jobs
-if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-    # Join job IDs with colons
-    trim_dependency="afterok"
-    for job_id in "${trim_job_ids[@]}"; do
-        trim_dependency+=":$job_id"
-    done
-    
-    echo "Dependency string: $trim_dependency"
-    
-    # Set output for merged files
-    merged_r1="${merged_dir}/merged_R1.fastq"
-    merged_r2="${merged_dir}/merged_R2.fastq"
-    
-    echo "Submitting merging job with dependency: $trim_dependency"
-    merge_job_id=$(sbatch --parsable \
-                  --partition="${cat_partition}" \
-                  --time="${cat_time}" \
-                  --nodes=${cat_nodes} \
-                  --cpus-per-task=${cat_cpu_cores_per_task} \
-                  --mem="${cat_mem}" \
-                  --dependency=$trim_dependency \
-                  --output="${merge_logs}/merge_%j.out" \
-                  --error="${merge_logs}/merge_%j.err" \
-                  bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs")
+# Set output for merged files
+merged_r1="${merged_dir}/merged_R1.fastq"
+merged_r2="${merged_dir}/merged_R2.fastq"
+
+# Check if merged files already exist in debug mode
+if [[ "$debug_mode" == "true" && -s "$merged_r1" && -s "$merged_r2" ]]; then
+    echo "Debug mode: Merged files already exist. Skipping merging job."
+    # Add entry to summary file
+    echo "Merging,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    merge_job_id="debug_skipped"
+else
+    # Create dependency string for merge job to wait for all trimming jobs
+    if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
+        trim_dependency=$(IFS=:; echo "afterok:${trim_job_ids[*]}")
+        echo "Submitting merging job with dependency: $trim_dependency"
+        
+        merge_job_id=$(sbatch --parsable \
+                      --partition="${cat_partition}" \
+                      --time="${cat_time}" \
+                      --nodes=${cat_nodes} \
+                      --cpus-per-task=${cat_cpu_cores_per_task} \
+                      --mem="${cat_mem}" \
+                      --dependency=$trim_dependency \
+                      --output="${merge_logs}/merge_%j.out" \
+                      --error="${merge_logs}/merge_%j.err" \
+                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
+    else
+        echo "Debug mode: No trimming jobs to depend on. Submitting merge job without dependencies."
+        
+        merge_job_id=$(sbatch --parsable \
+                      --partition="${cat_partition}" \
+                      --time="${cat_time}" \
+                      --nodes=${cat_nodes} \
+                      --cpus-per-task=${cat_cpu_cores_per_task} \
+                      --mem="${cat_mem}" \
+                      --output="${merge_logs}/merge_%j.out" \
+                      --error="${merge_logs}/merge_%j.err" \
+                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
+    fi
     
     # Check if job submission was successful
     if [[ $? -ne 0 || -z "$merge_job_id" ]]; then
-        echo "Error: Failed to submit merge job"
+        echo "Error: Failed to submit merging job"
         exit 1
     fi
     
+    echo "  Merge job ID: $merge_job_id"
+    
     # Verify job was submitted correctly
     if ! check_job_status "$merge_job_id" "merge"; then
-        echo "Warning: Job verification failed for merge job $merge_job_id"
+        echo "Warning: Job verification failed for merging job $merge_job_id"
         # Continue anyway, as the job might still be in queue
     fi
-    
-    echo "  Merge job ID: $merge_job_id"
-else
-    echo "Error: No trimming jobs were submitted successfully"
-    exit 1
 fi
 
-# Step 2.3: Submit assembly job (depends on merge job)
+# Step 2.3: Submit assembly job (depends on merging job)
 echo "Preparing to submit assembly job..."
-echo "Submitting assembly job with dependency: afterok:$merge_job_id"
-assembly_job_id=$(sbatch --parsable \
-                 --partition="${rnaSpades_partition}" \
-                 --time="${rnaSpades_time}" \
-                 --nodes=${rnaSpades_nodes} \
-                 --cpus-per-task=${rnaSpades_cpu_cores_per_task} \
-                 --mem="${rnaSpades_mem}" \
-                 --dependency=afterok:$merge_job_id \
-                 --output="${assembly_logs}/assembly_%j.out" \
-                 --error="${assembly_logs}/assembly_%j.err" \
-                 bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs")
+assembly_transcripts="${assembly_dir}/transcripts.fasta"
 
-# Check if job submission was successful
-if [[ $? -ne 0 || -z "$assembly_job_id" ]]; then
-    echo "Error: Failed to submit assembly job"
-    exit 1
+# Check if assembly already exists in debug mode
+if [[ "$debug_mode" == "true" && -s "$assembly_transcripts" ]]; then
+    echo "Debug mode: Assembly file already exists. Skipping assembly job."
+    # Add entry to summary file
+    echo "Assembly,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    assembly_job_id="debug_skipped"
+else
+    # Set up dependency for assembly job
+    if [[ "$merge_job_id" == "debug_skipped" ]]; then
+        echo "Debug mode: Merge job was skipped. Submitting assembly job without dependencies."
+        
+        assembly_job_id=$(sbatch --parsable \
+                         --partition="${rnaSpades_partition}" \
+                         --time="${rnaSpades_time}" \
+                         --nodes=${rnaSpades_nodes} \
+                         --cpus-per-task=${rnaSpades_cpu_cores_per_task} \
+                         --mem="${rnaSpades_mem}" \
+                         --output="${assembly_logs}/assembly_%j.out" \
+                         --error="${assembly_logs}/assembly_%j.err" \
+                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$SUMMARY_FILE" "$debug_mode")
+    else
+        echo "Submitting assembly job with dependency on merge job: $merge_job_id"
+        
+        assembly_job_id=$(sbatch --parsable \
+                         --partition="${rnaSpades_partition}" \
+                         --time="${rnaSpades_time}" \
+                         --nodes=${rnaSpades_nodes} \
+                         --cpus-per-task=${rnaSpades_cpu_cores_per_task} \
+                         --mem="${rnaSpades_mem}" \
+                         --dependency=afterok:$merge_job_id \
+                         --output="${assembly_logs}/assembly_%j.out" \
+                         --error="${assembly_logs}/assembly_%j.err" \
+                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$SUMMARY_FILE" "$debug_mode")
+    fi
+    
+    # Check if job submission was successful
+    if [[ $? -ne 0 || -z "$assembly_job_id" ]]; then
+        echo "Error: Failed to submit assembly job"
+        exit 1
+    fi
+    
+    echo "  Assembly job ID: $assembly_job_id"
+    
+    # Verify job was submitted correctly
+    if ! check_job_status "$assembly_job_id" "assembly"; then
+        echo "Warning: Job verification failed for assembly job $assembly_job_id"
+        # Continue anyway, as the job might still be in queue
+    fi
 fi
-
-# Verify job was submitted correctly
-if ! check_job_status "$assembly_job_id" "assembly"; then
-    echo "Warning: Job verification failed for assembly job $assembly_job_id"
-    # Continue anyway, as the job might still be in queue
-fi
-
-echo "  Assembly job ID: $assembly_job_id"
 
 # Step 2.4: Submit quality assessment jobs (depend on assembly job)
 echo "Preparing to submit quality assessment jobs..."
-# Set assembly output file
-assembly_fasta="${assembly_dir}/transcripts.fasta"
 
-# Submit BUSCO job
-echo "Submitting BUSCO job with dependency: afterok:$assembly_job_id"
-busco_job_id=$(sbatch --parsable \
-              --partition="${busco_partition}" \
-              --time="${busco_time}" \
-              --nodes=${busco_nodes} \
-              --cpus-per-task=${busco_cpu_cores_per_task} \
-              --mem="${busco_mem}" \
-              --dependency=afterok:$assembly_job_id \
-              --output="${busco_logs}/busco_%j.out" \
-              --error="${busco_logs}/busco_%j.err" \
-              bin/04_busco.sh "$assembly_fasta" "$busco_dir" "./busco_downloads" "new_assembly" "$busco_logs")
-
-# Check if job submission was successful
-if [[ $? -ne 0 || -z "$busco_job_id" ]]; then
-    echo "Error: Failed to submit BUSCO job"
-    exit 1
+# Check if BUSCO results already exist in debug mode
+busco_summary="${busco_dir}/short_summary.specific.${busco_lineage}.${busco_mode}.txt"
+if [[ "$debug_mode" == "true" && -s "$busco_summary" ]]; then
+    echo "Debug mode: BUSCO summary already exists. Skipping BUSCO job."
+    # Add entry to summary file
+    echo "BUSCO,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    busco_job_id="debug_skipped"
+else
+    # Set up dependency for BUSCO job
+    if [[ "$assembly_job_id" == "debug_skipped" ]]; then
+        echo "Debug mode: Assembly job was skipped. Submitting BUSCO job without dependencies."
+        
+        busco_job_id=$(sbatch --parsable \
+                      --partition="${busco_partition}" \
+                      --time="${busco_time}" \
+                      --nodes=${busco_nodes} \
+                      --cpus-per-task=${busco_cpu_cores_per_task} \
+                      --mem="${busco_mem}" \
+                      --output="${busco_logs}/busco_%j.out" \
+                      --error="${busco_logs}/busco_%j.err" \
+                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+    else
+        echo "Submitting BUSCO job with dependency on assembly job: $assembly_job_id"
+        
+        busco_job_id=$(sbatch --parsable \
+                      --partition="${busco_partition}" \
+                      --time="${busco_time}" \
+                      --nodes=${busco_nodes} \
+                      --cpus-per-task=${busco_cpu_cores_per_task} \
+                      --mem="${busco_mem}" \
+                      --dependency=afterok:$assembly_job_id \
+                      --output="${busco_logs}/busco_%j.out" \
+                      --error="${busco_logs}/busco_%j.err" \
+                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+    fi
+    
+    # Check if job submission was successful
+    if [[ $? -ne 0 || -z "$busco_job_id" ]]; then
+        echo "Error: Failed to submit BUSCO job"
+        exit 1
+    fi
+    
+    echo "  BUSCO job ID: $busco_job_id"
+    
+    # Verify job was submitted correctly
+    if ! check_job_status "$busco_job_id" "busco"; then
+        echo "Warning: Job verification failed for BUSCO job $busco_job_id"
+        # Continue anyway, as the job might still be in queue
+    fi
 fi
 
-# Verify job was submitted correctly
-if ! check_job_status "$busco_job_id" "busco"; then
-    echo "Warning: Job verification failed for BUSCO job $busco_job_id"
-    # Continue anyway, as the job might still be in queue
+# Check if rnaQuast results already exist in debug mode
+rnaquast_report="${rnaquast_dir}/report.txt"
+if [[ "$debug_mode" == "true" && -s "$rnaquast_report" ]]; then
+    echo "Debug mode: rnaQuast report already exists. Skipping rnaQuast job."
+    # Add entry to summary file
+    echo "rnaQuast,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    rnaquast_job_id="debug_skipped"
+else
+    # Set up dependency for rnaQuast job
+    if [[ "$assembly_job_id" == "debug_skipped" ]]; then
+        echo "Debug mode: Assembly job was skipped. Submitting rnaQuast job without dependencies."
+        
+        rnaquast_job_id=$(sbatch --parsable \
+                         --partition="${rnaQuast_partition}" \
+                         --time="${rnaQuast_time}" \
+                         --nodes=${rnaQuast_nodes} \
+                         --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
+                         --mem="${rnaQuast_mem}" \
+                         --output="${rnaquast_logs}/rnaquast_%j.out" \
+                         --error="${rnaquast_logs}/rnaquast_%j.err" \
+                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+    else
+        echo "Submitting rnaQuast job with dependency on assembly job: $assembly_job_id"
+        
+        rnaquast_job_id=$(sbatch --parsable \
+                         --partition="${rnaQuast_partition}" \
+                         --time="${rnaQuast_time}" \
+                         --nodes=${rnaQuast_nodes} \
+                         --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
+                         --mem="${rnaQuast_mem}" \
+                         --dependency=afterok:$assembly_job_id \
+                         --output="${rnaquast_logs}/rnaquast_%j.out" \
+                         --error="${rnaquast_logs}/rnaquast_%j.err" \
+                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+    fi
+    
+    # Check if job submission was successful
+    if [[ $? -ne 0 || -z "$rnaquast_job_id" ]]; then
+        echo "Error: Failed to submit rnaQuast job"
+        exit 1
+    fi
+    
+    echo "  rnaQuast job ID: $rnaquast_job_id"
+    
+    # Verify job was submitted correctly
+    if ! check_job_status "$rnaquast_job_id" "rnaquast"; then
+        echo "Warning: Job verification failed for rnaQuast job $rnaquast_job_id"
+        # Continue anyway, as the job might still be in queue
+    fi
 fi
 
-echo "  BUSCO job ID: $busco_job_id"
-
-# Submit rnaQuast job
-echo "Submitting rnaQuast job with dependency: afterok:$assembly_job_id"
-rnaquast_job_id=$(sbatch --parsable \
-                 --partition="${rnaQuast_partition}" \
-                 --time="${rnaQuast_time}" \
-                 --nodes=${rnaQuast_nodes} \
-                 --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
-                 --mem="${rnaQuast_mem}" \
-                 --dependency=afterok:$assembly_job_id \
-                 --output="${rnaquast_logs}/rnaquast_%j.out" \
-                 --error="${rnaquast_logs}/rnaquast_%j.err" \
-                 bin/04_rnaquast.sh "$assembly_fasta" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs")
-
-# Check if job submission was successful
-if [[ $? -ne 0 || -z "$rnaquast_job_id" ]]; then
-    echo "Error: Failed to submit rnaQuast job"
-    exit 1
-fi
-
-# Verify job was submitted correctly
-if ! check_job_status "$rnaquast_job_id" "rnaquast"; then
-    echo "Warning: Job verification failed for rnaQuast job $rnaquast_job_id"
-    # Continue anyway, as the job might still be in queue
-fi
-
-echo "  rnaQuast job ID: $rnaquast_job_id"
-
-# Draft transcriptome analysis (if available)
+# If draft transcriptome is provided, run quality assessment on it too
 draft_busco_job_id=""
 draft_rnaquast_job_id=""
 if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
     echo "Found draft transcriptome: $draft_transcriptome"
-    echo "Submitting BUSCO job for draft transcriptome"
-    draft_busco_job_id=$(sbatch --parsable \
-                        --partition="${busco_partition}" \
-                        --time="${busco_time}" \
-                        --nodes=${busco_nodes} \
-                        --cpus-per-task=${busco_cpu_cores_per_task} \
-                        --mem="${busco_mem}" \
-                        --output="${busco_logs}/draft_busco_%j.out" \
-                        --error="${busco_logs}/draft_busco_%j.err" \
-                        bin/04_busco.sh "$draft_transcriptome" "$draft_busco_dir" "./busco_downloads" "draft_assembly" "$busco_logs")
     
-    # Check if job submission was successful
-    if [[ $? -ne 0 || -z "$draft_busco_job_id" ]]; then
-        echo "Error: Failed to submit draft BUSCO job"
-        # Continue anyway, as this is optional
+    # Check if draft BUSCO results already exist in debug mode
+    draft_busco_summary="${draft_busco_dir}/short_summary.specific.${busco_lineage}.draft_assembly.txt"
+    if [[ "$debug_mode" == "true" && -s "$draft_busco_summary" ]]; then
+        echo "Debug mode: Draft BUSCO summary already exists. Skipping draft BUSCO job."
+        # Add entry to summary file
+        echo "BUSCO,draft,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+        draft_busco_job_id="debug_skipped"
     else
-        echo "  Draft BUSCO job ID: $draft_busco_job_id"
+        echo "Submitting BUSCO job for draft transcriptome"
+        draft_busco_job_id=$(sbatch --parsable \
+                            --partition="${busco_partition}" \
+                            --time="${busco_time}" \
+                            --nodes=${busco_nodes} \
+                            --cpus-per-task=${busco_cpu_cores_per_task} \
+                            --mem="${busco_mem}" \
+                            --output="${busco_logs}/draft_busco_%j.out" \
+                            --error="${busco_logs}/draft_busco_%j.err" \
+                            bin/04_busco.sh "$draft_transcriptome" "$draft_busco_dir" "./busco_downloads" "draft_assembly" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+        
+        # Check if job submission was successful
+        if [[ $? -ne 0 || -z "$draft_busco_job_id" ]]; then
+            echo "Error: Failed to submit draft BUSCO job"
+            # Continue anyway, as this is optional
+        else
+            echo "  Draft BUSCO job ID: $draft_busco_job_id"
+        fi
     fi
-
-    echo "Submitting rnaQuast job for draft transcriptome"
-    draft_rnaquast_job_id=$(sbatch --parsable \
-                           --partition="${rnaQuast_partition}" \
-                           --time="${rnaQuast_time}" \
-                           --nodes=${rnaQuast_nodes} \
-                           --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
-                           --mem="${rnaQuast_mem}" \
-                           --output="${rnaquast_logs}/draft_rnaquast_%j.out" \
-                           --error="${rnaquast_logs}/draft_rnaquast_%j.err" \
-                           bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs")
     
-    # Check if job submission was successful
-    if [[ $? -ne 0 || -z "$draft_rnaquast_job_id" ]]; then
-        echo "Error: Failed to submit draft rnaQuast job"
-        # Continue anyway, as this is optional
+    # Check if draft rnaQuast results already exist in debug mode
+    draft_rnaquast_report="${draft_rnaquast_dir}/report.txt"
+    if [[ "$debug_mode" == "true" && -s "$draft_rnaquast_report" ]]; then
+        echo "Debug mode: Draft rnaQuast report already exists. Skipping draft rnaQuast job."
+        # Add entry to summary file
+        echo "rnaQuast,draft,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+        draft_rnaquast_job_id="debug_skipped"
     else
-        echo "  Draft rnaQuast job ID: $draft_rnaquast_job_id"
+        echo "Submitting rnaQuast job for draft transcriptome"
+        draft_rnaquast_job_id=$(sbatch --parsable \
+                               --partition="${rnaQuast_partition}" \
+                               --time="${rnaQuast_time}" \
+                               --nodes=${rnaQuast_nodes} \
+                               --cpus-per-task=${rnaQuast_cpu_cores_per_task} \
+                               --mem="${rnaQuast_mem}" \
+                               --output="${rnaquast_logs}/draft_rnaquast_%j.out" \
+                               --error="${rnaquast_logs}/draft_rnaquast_%j.err" \
+                               bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+        
+        # Check if job submission was successful
+        if [[ $? -ne 0 || -z "$draft_rnaquast_job_id" ]]; then
+            echo "Error: Failed to submit draft rnaQuast job"
+            # Continue anyway, as this is optional
+        else
+            echo "  Draft rnaQuast job ID: $draft_rnaquast_job_id"
+        fi
     fi
 fi
 
 # Step 2.5: Submit visualization job (depends on all quality assessment jobs)
 echo "Preparing to submit visualization job..."
-# Create dependency string for visualization - include draft jobs if they exist
-viz_dependency="afterok:$busco_job_id:$rnaquast_job_id"
-if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" && -n "$draft_busco_job_id" && -n "$draft_rnaquast_job_id" ]]; then
-    viz_dependency="$viz_dependency:$draft_busco_job_id:$draft_rnaquast_job_id"
-    # Pass both new and draft directories
-    viz_job_id=$(sbatch --parsable \
-                --partition="${visualize_partition}" \
-                --time="${visualize_time}" \
-                --nodes=${visualize_nodes} \
-                --cpus-per-task=${visualize_cpu_cores_per_task} \
-                --mem="${visualize_mem}" \
-                --dependency=$viz_dependency \
-                --output="${viz_logs}/visualize_%j.out" \
-                --error="${viz_logs}/visualize_%j.err" \
-                bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_logs")
+# Check if visualization results already exist in debug mode
+viz_plot="${viz_dir}/combined_plot.pdf"
+if [[ "$debug_mode" == "true" && -s "$viz_plot" ]]; then
+    echo "Debug mode: Visualization plot already exists. Skipping visualization job."
+    # Add entry to summary file
+    echo "Visualization,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
+    viz_job_id="debug_skipped"
 else
-    viz_job_id=$(sbatch --parsable \
-                --partition="${visualize_partition}" \
-                --time="${visualize_time}" \
-                --nodes=${visualize_nodes} \
-                --cpus-per-task=${visualize_cpu_cores_per_task} \
-                --mem="${visualize_mem}" \
-                --dependency=$viz_dependency \
-                --output="${viz_logs}/visualize_%j.out" \
-                --error="${viz_logs}/visualize_%j.err" \
-                bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "" "" "$viz_logs")
-fi
-
-# Check if job submission was successful
-if [[ $? -ne 0 || -z "$viz_job_id" ]]; then
-    echo "Error: Failed to submit visualization job"
-    exit 1
-fi
-
-# Verify job was submitted correctly
-if ! check_job_status "$viz_job_id" "visualize"; then
-    echo "Warning: Job verification failed for visualization job $viz_job_id"
-    # Continue anyway, as the job might still be in queue
+    # Create dependency string for visualization
+    viz_dependency=""
+    if [[ "$busco_job_id" != "debug_skipped" && "$rnaquast_job_id" != "debug_skipped" ]]; then
+        viz_dependency="afterok:$busco_job_id:$rnaquast_job_id"
+        
+        # Add draft jobs if they exist and weren't skipped
+        if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
+            if [[ "$draft_busco_job_id" != "debug_skipped" && "$draft_rnaquast_job_id" != "debug_skipped" ]]; then
+                viz_dependency="$viz_dependency:$draft_busco_job_id:$draft_rnaquast_job_id"
+            fi
+        fi
+        
+        viz_job_id=$(sbatch --parsable \
+                    --partition="${visualize_partition}" \
+                    --time="${visualize_time}" \
+                    --nodes=${visualize_nodes} \
+                    --cpus-per-task=${visualize_cpu_cores_per_task} \
+                    --mem="${visualize_mem}" \
+                    --dependency=$viz_dependency \
+                    --output="${viz_logs}/visualize_%j.out" \
+                    --error="${viz_logs}/visualize_%j.err" \
+                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_logs")
+    else
+        viz_job_id=$(sbatch --parsable \
+                    --partition="${visualize_partition}" \
+                    --time="${visualize_time}" \
+                    --nodes=${visualize_nodes} \
+                    --cpus-per-task=${visualize_cpu_cores_per_task} \
+                    --mem="${visualize_mem}" \
+                    --dependency=$viz_dependency \
+                    --output="${viz_logs}/visualize_%j.out" \
+                    --error="${viz_logs}/visualize_%j.err" \
+                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "" "" "$viz_logs")
+    fi
+    
+    # Check if job submission was successful
+    if [[ $? -ne 0 || -z "$viz_job_id" ]]; then
+        echo "Error: Failed to submit visualization job"
+        exit 1
+    fi
+    
+    # Verify job was submitted correctly
+    if ! check_job_status "$viz_job_id" "visualize"; then
+        echo "Warning: Job verification failed for visualization job $viz_job_id"
+        # Continue anyway, as the job might still be in queue
+    fi
 fi
 
 echo "  Visualization job ID: $viz_job_id"
