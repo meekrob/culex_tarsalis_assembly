@@ -2,10 +2,10 @@
 
 # slurm parameters, see config/parameters.txt
 #SBATCH --partition=medium-cpu
-#SBATCH --time=24:00:00
+#SBATCH --time=7:00:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=250G
 #SBATCH --job-name=rnaspades
 # Log files will be specified when submitting the job
 
@@ -55,7 +55,7 @@ rnaspades.py \
     -1 "$MERGED_R1" \
     -2 "$MERGED_R2" \
     -o "$OUTPUT_DIR" \
-    -t 16 \
+    -t 64 \
     -m 64 \
     2>> $ASSEMBLY_LOG
 
