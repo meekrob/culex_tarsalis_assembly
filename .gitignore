@@ -14,3 +14,5 @@
 *.pack
 *.sample
 *.idx
+logs/
+temp/
