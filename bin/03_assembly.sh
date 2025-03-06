@@ -64,6 +64,17 @@ mkdir -p $TMP
 export TMPDIR=$TMP
 echo "Using temporary directory: $TMPDIR" | tee -a $ASSEMBLY_LOG
 
+# Calculate memory in GB from SLURM_MEM_PER_NODE (which is in MB)
+if [[ -n "$SLURM_MEM_PER_NODE" ]]; then
+    # Convert MB to GB, round down
+    MEM_GB=$((SLURM_MEM_PER_NODE / 1024))
+    # Reserve a small amount for system overhead (5%)
+    SPADES_MEM=$((MEM_GB * 95 / 100))
+else
+    # Default to 240GB if SLURM_MEM_PER_NODE is not set
+    SPADES_MEM=240
+fi
+
 # Run rnaSPAdes with appropriate parameters
 rnaspades.py \
     --rna \
@@ -71,7 +82,7 @@ rnaspades.py \
     -2 "$MERGED_R2" \
     -o "$OUTPUT_DIR" \
     -t $SLURM_CPUS_PER_TASK \
-    -m 64 \
+    -m $SPADES_MEM \
     2>> $ASSEMBLY_LOG
 
 # Check if rnaSPAdes completed successfully
