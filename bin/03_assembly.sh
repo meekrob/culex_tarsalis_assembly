@@ -16,7 +16,7 @@ source config/parameters.txt
 left=$1    # Merged and trimmed R1 file
 right=$2   # Merged and trimmed R2 file
 out=$3     # Output directory for assembly
-other_opts=${4:-"${rnaSpades.opts}"}  # Additional options for rnaSPAdes (optional)
+other_opts=${4:-"${rnaSpades_opts}"}  # Additional options for rnaSPAdes (optional)
 LOG_DIR=${5:-"logs/03_assembly"}  # Directory for logs
 
 # Enhance input validation
@@ -48,7 +48,7 @@ export TMPDIR=$TMP
 echo "Using temporary directory: $TMPDIR"
 
 # run rnaspades with configurable threads
-cmd="rnaspades.py -t ${rnaSpades.threads} -1 $left -2 $right -o $out $other_opts" 
+cmd="rnaspades.py -t ${rnaSpades_threads} -1 $left -2 $right -o $out $other_opts" 
 echo "Executing command: $cmd"
 time eval $cmd
 

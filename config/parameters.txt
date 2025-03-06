@@ -1,59 +1,58 @@
 # parameters.txt
-# parameters are taken from jobscripts templates
-
+# Define parameters in a format suitable for sourcing into shell scripts
 
 # fastp job parameters
-fastp.partition=short-cpu
-fastp.time=01:00:00
-fastp.nodes=1
-fastp.cpu-cores-per-task=17
-fastp.mem=8G
+fastp_partition="short-cpu"
+fastp_time="01:00:00"
+fastp_nodes=1
+fastp_cpu_cores_per_task=17
+fastp_mem="8G"
 # fastp tool parameters
-fastp.threads=$((SLURM_CPUS_PER_TASK-1))
-fastp.opts="--dedup"
+fastp_threads=$((SLURM_CPUS_PER_TASK-1))
+fastp_opts="--dedup"
 
 # cat job parameters
-cat.partition=short-cpu
-cat.time=01:00:00
-cat.nodes=1
-cat.cpu-cores-per-task=2
-cat.mem=16G
+cat_partition="short-cpu"
+cat_time="01:00:00"
+cat_nodes=1
+cat_cpu_cores_per_task=2
+cat_mem="16G"
 
 # rnaSpades job parameters
-rnaSpades.partition=week-long-highmem
-rnaSpades.time=7:00:00:00
-rnaSpades.nodes=2
-rnaSpades.cpu-cores-per-task=32
-rnaSpades.mem=250GB 	# Might need more 
+rnaSpades_partition="week-long-highmem"
+rnaSpades_time="7-00:00:00"
+rnaSpades_nodes=2
+rnaSpades_cpu_cores_per_task=32
+rnaSpades_mem="250G"  # Might need more 
 # rnaSpades tool parameters
-rnaSpades.threads=$SLURM_CPUS_PER_TASK
-rnaSpades.opts=""
+rnaSpades_threads=$SLURM_CPUS_PER_TASK
+rnaSpades_opts=""
 
 # busco job parameters
-busco.partition=short-cpu
-busco.time=01:00:00
-busco.nodes=1
-busco.cpu-cores-per-task=24
-busco.mem=32G
+busco_partition="short-cpu"
+busco_time="01:00:00"
+busco_nodes=1
+busco_cpu_cores_per_task=24
+busco_mem="32G"
 # busco tool parameters
-busco.lineage="diptera_odb10"
-busco.mode="transcriptome"
+busco_lineage="diptera_odb10"
+busco_mode="transcriptome"
 
 # rnaQuast job parameters
-rnaQuast.partition=short-cpu
-rnaQuast.time=01:00:00
-rnaQuast.nodes=1
-rnaQuast.cpu-cores-per-task=24
-rnaQuast.mem=32G
+rnaQuast_partition="short-cpu"
+rnaQuast_time="01:00:00"
+rnaQuast_nodes=1
+rnaQuast_cpu_cores_per_task=24
+rnaQuast_mem="32G"
 # rnaQuast tool parameters
-rnaQuast.threads=$SLURM_CPUS_PER_TASK
-rnaQuast.opts=""
+rnaQuast_threads=$SLURM_CPUS_PER_TASK
+rnaQuast_opts=""
 
 # visualization job parameters
-visualize.partition=short-cpu
-visualize.time=00:30:00
-visualize.nodes=1
-visualize.cpu-cores-per-task=1
-visualize.mem=4G
+visualize_partition="short-cpu"
+visualize_time="00:30:00"
+visualize_nodes=1
+visualize_cpu_cores_per_task=1
+visualize_mem="4G"
 
 

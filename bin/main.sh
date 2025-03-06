@@ -4,9 +4,54 @@
 # main.sh - Master control script for mosquito RNA-seq pipeline
 # This script identifies input files, sets up directories, and manages job dependencies
 
+#SBATCH --job-name=main
+#SBATCH --output=logs/main_%j.out
+#SBATCH --error=logs/main_%j.err
 
 # Source conda
 source ~/.bashrc
+
+# Default values - use current directory as base
+current_dir=$(pwd)
+raw_reads_dir="${current_dir}/data/raw_reads"
+result_base="${current_dir}/results"
+draft_transcriptome=""
+
+# Parse command line arguments
+while getopts ":R:h" opt; do
+  case ${opt} in
+    R )
+      draft_transcriptome=$OPTARG
+      ;;
+    h )
+      echo "Usage: $0 [-R /path/to/reference/transcriptome] [raw_reads_dir] [result_base]"
+      echo "  -R: Path to reference transcriptome (optional)"
+      echo "  raw_reads_dir: Directory with raw fastq files (default: ./data/raw_reads)"
+      echo "  result_base: Base directory for all results (default: ./results)"
+      exit 0
+      ;;
+    \? )
+      echo "Invalid option: -$OPTARG" 1>&2
+      exit 1
+      ;;
+    : )
+      echo "Option -$OPTARG requires an argument." 1>&2
+      exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+# Override defaults with positional arguments if provided
+if [ "$1" != "" ]; then
+  raw_reads_dir=$1
+fi
+if [ "$2" != "" ]; then
+  result_base=$2
+fi
+
+# Create logs directory before sourcing parameters to ensure SLURM output has a place to go
+mkdir -p "${result_base}/logs"
 
 # Source parameters file
 source config/parameters.txt
@@ -18,11 +63,6 @@ if ! conda info --envs | grep -q "cellSquito"; then
 else
     echo "cellSquito conda environment already exists"
 fi
-
-# Define directories (adjust these as needed)
-raw_reads_dir="${1:-/data/raw_reads}"         # Directory with raw fastq files
-result_base="${2:-/results}"                  # Base directory for all results
-draft_transcriptome="${3:-input/draft_transcriptome/draft.fasta}"  # Path to draft transcriptome (optional)
 
 # Create more specific output directories
 trimmed_dir="${result_base}/01_trimmed"         # Directory for fastp output
@@ -45,95 +85,99 @@ rnaquast_logs="${logs_base}/04_rnaquast"      # Logs for rnaQuast
 viz_logs="${logs_base}/05_visualization"      # Logs for visualization
 summary_logs="${logs_base}/summaries"         # Logs for summary reports
 
-# Create output directories
+# Create output and log directories
 mkdir -p "$trimmed_dir" "$merged_dir" "$assembly_dir" "$busco_dir" "$rnaquast_dir" \
          "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_dir"
 mkdir -p "$trim_logs" "$merge_logs" "$assembly_logs" "$busco_logs" "$rnaquast_logs" \
          "$viz_logs" "$summary_logs"
 
 # Create temporary directory for file lists
-tmp_dir="${result_base}/tmp"
-mkdir -p "$tmp_dir"
+temp_dir="${result_base}/temp"
+mkdir -p "$temp_dir"
+r1_trimmed_list="${temp_dir}/r1_trimmed_files.txt"
+r2_trimmed_list="${temp_dir}/r2_trimmed_files.txt"
+> "$r1_trimmed_list"  # Clear contents
+> "$r2_trimmed_list"  # Clear contents
 
+# Print pipeline information
 echo "===== Mosquito RNA-Seq Pipeline ====="
 echo "Raw reads directory: $raw_reads_dir"
 echo "Results directory: $result_base"
 echo "Log files: $logs_base"
-if [[ -f "$draft_transcriptome" ]]; then
-    echo "Draft transcriptome: $draft_transcriptome"
-fi
 echo "======================================="
 
-### Step 1: Parse Raw Reads and Identify Pairs
+# Step 1: Identify read pairs
 echo "Identifying read pairs..."
+echo "Pairing read files based on naming patterns..."
 
-# Find all R1 files and extract sample names
-# example name: Cxt-r2-35_R1_001.fastq.gz
-# example name: Cx-Adult_R1.fastq.gz 
-
-# Update pattern to handle both .fastq and .fastq.gz files
-R1_files=($(ls ${raw_reads_dir}/*_R1*.fastq* 2>/dev/null))
+# Improved file pairing logic to handle various naming conventions
 samples=()
 r1_files_array=()
 r2_files_array=()
 
-# Enhanced documentation for read pairing logic
-echo "Pairing read files based on naming patterns..."
-for r1_file in "${R1_files[@]}"; do
-    # Extract the filename without the path
-    filename=$(basename "$r1_file")
+# Check if raw_reads_dir exists
+if [[ ! -d "$raw_reads_dir" ]]; then
+    echo "Error: Raw reads directory $raw_reads_dir does not exist!" >&2
+    exit 1
+fi
+
+# Find all fastq files
+fastq_files=($(find "$raw_reads_dir" -type f -name "*.fastq.gz" | sort))
+
+if [[ ${#fastq_files[@]} -eq 0 ]]; then
+    echo "Error: No fastq.gz files found in $raw_reads_dir" >&2
+    exit 1
+fi
+
+# Common patterns for read pairs
+patterns=(
+    "_R1_001.fastq.gz:_R2_001.fastq.gz"
+    "_R1.fastq.gz:_R2.fastq.gz"
+    "_1.fastq.gz:_2.fastq.gz"
+)
+
+# Find paired files
+paired_found=0
+for ((i=0; i<${#fastq_files[@]}; i++)); do
+    r1_file="${fastq_files[$i]}"
     
-    # Extract sample name by removing R1 part and extensions
-    # This handles both patterns: *_R1_001.fastq.gz and *_R1.fastq.gz
-    sample_name=$(echo "$filename" | sed -E 's/(.*)_R1(.*)\.(fastq|fastq\.gz)$/\1/')
-    
-    # Construct expected R2 filename pattern
-    if [[ "$filename" == *"_R1_"* ]]; then
-        # For pattern: *_R1_001.fastq.gz
-        r2_pattern="${sample_name}_R2"$(echo "$filename" | sed -E 's/.*(_R1)(.*)$/\2/')
-    else
-        # For pattern: *_R1.fastq.gz
-        r2_pattern="${sample_name}_R2."$(echo "$filename" | sed -E 's/.*\.(fastq.*)$/\1/')
-    fi
-    
-    # Check if R2 file exists
-    r2_file=$(ls ${raw_reads_dir}/${r2_pattern} 2>/dev/null)
-    
-    if [[ -f "$r2_file" ]]; then
-        samples+=("$sample_name")
-        r1_files_array+=("$r1_file")
-        r2_files_array+=("$r2_file")
-    else
-        echo "Warning: No matching R2 file found for $r1_file"
-    fi
+    # Only process R1 files
+    for pattern in "${patterns[@]}"; do
+        IFS=':' read -r r1_suffix r2_suffix <<< "$pattern"
+        
+        if [[ "$r1_file" == *"$r1_suffix" ]]; then
+            r2_file="${r1_file/$r1_suffix/$r2_suffix}"
+            
+            # Check if the R2 file exists
+            if [[ -f "$r2_file" ]]; then
+                # Extract sample name from filename
+                base_name=$(basename "$r1_file" "$r1_suffix")
+                samples+=("$base_name")
+                r1_files_array+=("$r1_file")
+                r2_files_array+=("$r2_file")
+                paired_found=$((paired_found + 1))
+                break  # Found a matching pattern, move to the next file
+            fi
+        fi
+    done
 done
 
-# Print samples and file pairs for verification
-echo "Found ${#samples[@]} paired read files:"
+echo "Found $paired_found paired read files:"
 for ((i=0; i<${#samples[@]}; i++)); do
-    echo "Sample: ${samples[$i]}"
-    echo "  R1: $(basename "${r1_files_array[$i]}")"
-    echo "  R2: $(basename "${r2_files_array[$i]}")"
+    echo "  Sample: ${samples[$i]}"
+    echo "    R1: ${r1_files_array[$i]}"
+    echo "    R2: ${r2_files_array[$i]}"
 done
 
-# Check if any read pairs were found
-if [[ ${#samples[@]} -eq 0 ]]; then
+if [[ $paired_found -eq 0 ]]; then
     echo "Error: No read pairs found in $raw_reads_dir"
     exit 1
 fi
 
-### Step 2: Submit jobs
-# Create file lists for later job submissions
-r1_trimmed_list="${tmp_dir}/r1_trimmed_files.txt"
-r2_trimmed_list="${tmp_dir}/r2_trimmed_files.txt"
-> $r1_trimmed_list  # Clear the file if it exists
-> $r2_trimmed_list  # Clear the file if it exists
-
-# Array to store job IDs for dependency management
-trim_job_ids=()
-
+# Step 2: Submit jobs in sequence with dependencies
 # Step 2.1: Submit trimming jobs for each pair
 echo "Submitting trimming jobs..."
+trim_job_ids=()
 for ((i=0; i<${#samples[@]}; i++)); do
     sample="${samples[$i]}"
     r1="${r1_files_array[$i]}"
@@ -150,6 +194,11 @@ for ((i=0; i<${#samples[@]}; i++)); do
     echo "Submitting trimming job for sample $sample"
     # Submit trimming job with specific log directory and files
     job_id=$(sbatch --parsable \
+             --partition="${fastp_partition}" \
+             --time="${fastp_time}" \
+             --nodes=${fastp_nodes} \
+             --cpus-per-task=${fastp_cpu_cores_per_task} \
+             --mem="${fastp_mem}" \
              --output="${trim_logs}/trim_${sample}_%j.out" \
              --error="${trim_logs}/trim_${sample}_%j.err" \
              bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$trim_logs")
@@ -168,6 +217,11 @@ merged_r2="${merged_dir}/merged_R2.fastq"
 
 echo "Submitting merging job with dependency: $trim_dependency"
 merge_job_id=$(sbatch --parsable \
+              --partition="${cat_partition}" \
+              --time="${cat_time}" \
+              --nodes=${cat_nodes} \
+              --cpus-per-task=${cat_cpu_cores_per_task} \
+              --mem="${cat_mem}" \
               --dependency=$trim_dependency \
               --output="${merge_logs}/merge_%j.out" \
               --error="${merge_logs}/merge_%j.err" \
@@ -178,10 +232,15 @@ echo "  Merge job ID: $merge_job_id"
 echo "Preparing to submit assembly job..."
 echo "Submitting assembly job with dependency: afterok:$merge_job_id"
 assembly_job_id=$(sbatch --parsable \
+                 --partition="${rnaSpades_partition}" \
+                 --time="${rnaSpades_time}" \
+                 --nodes=${rnaSpades_nodes} \
+                 --cpus-per-task=${rnaSpades_cpu_cores_per_task} \
+                 --mem="${rnaSpades_mem}" \
                  --dependency=afterok:$merge_job_id \
                  --output="${assembly_logs}/assembly_%j.out" \
                  --error="${assembly_logs}/assembly_%j.err" \
-                 bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades.opts}" "$assembly_logs")
+                 bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs")
 echo "  Assembly job ID: $assembly_job_id"
 
 # Step 2.4: Submit quality assessment jobs (depend on assembly job)
@@ -205,7 +264,7 @@ rnaquast_job_id=$(sbatch --parsable \
                  --dependency=afterok:$assembly_job_id \
                  --output="${rnaquast_logs}/rnaquast_%j.out" \
                  --error="${rnaquast_logs}/rnaquast_%j.err" \
-                 bin/04_rnaquast.sh "$assembly_fasta" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast.opts}" "$rnaquast_logs")
+                 bin/04_rnaquast.sh "$assembly_fasta" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs")
 echo "  rnaQuast job ID: $rnaquast_job_id"
 
 # Draft transcriptome analysis (if available)
@@ -224,7 +283,7 @@ if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
     draft_rnaquast_job_id=$(sbatch --parsable \
                            --output="${rnaquast_logs}/draft_rnaquast_%j.out" \
                            --error="${rnaquast_logs}/draft_rnaquast_%j.err" \
-                           bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast.opts}" "$rnaquast_logs")
+                           bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs")
     echo "  Draft rnaQuast job ID: $draft_rnaquast_job_id"
 fi
 

@@ -41,7 +41,7 @@ if [[ ! -f "$TX_FASTA" ]]; then
 fi
 
 # run busco on the assembly from rnaspades using configurable parameters
-cmd="busco -i $TX_FASTA --download_path $BUSCO_DOWNLOADS --lineage_dataset ${busco.lineage} --mode ${busco.mode} --cpu $SLURM_CPUS_PER_TASK --out $OUT"
+cmd="busco -i $TX_FASTA --download_path $BUSCO_DOWNLOADS --lineage_dataset ${busco_lineage} --mode ${busco_mode} --cpu $SLURM_CPUS_PER_TASK --out $OUT"
 echo "Executing command: $cmd"
 time eval $cmd
 

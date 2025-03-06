@@ -47,7 +47,7 @@ if [[ ! -f "$left" || ! -f "$right" ]]; then
 fi
 
 # run rnaquast on the assembly from rnaspades
-cmd="rnaquast.py --transcripts $ASSEMBLY -t ${rnaQuast.threads} -o $OUT -1 $left -2 $right $other_opts"
+cmd="rnaquast.py --transcripts $ASSEMBLY -t ${rnaQuast_threads} -o $OUT -1 $left -2 $right $other_opts"
 echo "Executing command: $cmd"
 time eval $cmd
 

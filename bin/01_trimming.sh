@@ -47,7 +47,7 @@ echo "Output R2: $TRIM2"
 cmd="fastp -i ${FILE} -I ${TWO} \
              -o ${TRIM1} -O ${TRIM2} \
              -h htmls/$(basename $FILE).html -j htmls/$(basename $FILE).json \
-             -w ${fastp.threads} ${fastp.opts}"
+             -w ${fastp_threads} ${fastp_opts}"
 echo "Executing command: $cmd"
 time eval $cmd
 
