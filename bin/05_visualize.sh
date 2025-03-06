@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --job-name=visualize
-#SBATCH --output=logs/visualize_%j.out
-#SBATCH --error=logs/visualize_%j.err
+# Log files will be specified when submitting the job
 
 # Source configuration
 source config/parameters.txt
@@ -20,9 +19,11 @@ OUT_DIR=$3       # Output directory for visualizations
 # Optional arguments for draft transcriptome comparison
 DRAFT_BUSCO_DIR=${4:-""}  # Draft BUSCO results
 DRAFT_RNAQUAST_DIR=${5:-""}  # Draft rnaQuast results
+LOG_DIR=${6:-"logs/05_visualization"}  # Directory for logs
 
-# Create output directory if it doesn't exist
+# Create necessary directories
 mkdir -p $OUT_DIR
+mkdir -p $LOG_DIR
 
 # activate conda env
 source ~/.bashrc

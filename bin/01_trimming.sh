@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=17
 #SBATCH --mem=8G
 #SBATCH --job-name=fastp_trim
-#SBATCH --output=logs/fastp_%j.out
-#SBATCH --error=logs/fastp_%j.err
+# Log files will be specified when submitting the job
 
 # Source configuration
 source config/parameters.txt
@@ -19,7 +18,7 @@ TWO=$2     # R2 input file
 TRIM1=$3   # R1 output file
 TRIM2=$4   # R2 output file
 SAMPLE_NAME=$5  # Sample name for logs/reporting
-LOG_DIR=${6:-"logs"}  # Directory for logs
+LOG_DIR=${6:-"logs/01_trimming"}  # Directory for logs
 
 # Enhance input validation
 for f in "$FILE" "$TWO"; do

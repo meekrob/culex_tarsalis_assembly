@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=250G
 #SBATCH --job-name=rnaspades
-#SBATCH --output=logs/assembly_%j.out
-#SBATCH --error=logs/assembly_%j.err
+# Log files will be specified when submitting the job
 
 # Source configuration
 source config/parameters.txt
@@ -18,6 +17,7 @@ left=$1    # Merged and trimmed R1 file
 right=$2   # Merged and trimmed R2 file
 out=$3     # Output directory for assembly
 other_opts=${4:-"${rnaSpades.opts}"}  # Additional options for rnaSPAdes (optional)
+LOG_DIR=${5:-"logs/03_assembly"}  # Directory for logs
 
 # Enhance input validation
 for f in "$left" "$right"; do
@@ -27,8 +27,9 @@ for f in "$left" "$right"; do
     fi
 done
 
-# Create output directory if it doesn't exist
+# Create necessary directories
 mkdir -p $out
+mkdir -p $LOG_DIR
 
 # activate conda env
 source ~/.bashrc
@@ -64,11 +65,10 @@ if [[ -f "$out/transcripts.fasta" ]]; then
     grep -A 4 "Assembly summary" $out/spades.log
     
     # Add some basic stats to a log file
-    mkdir -p logs
-    echo "Assembly Statistics" > logs/assembly_stats.txt
-    echo "Date: $(date)" >> logs/assembly_stats.txt
-    echo "Input files: $left, $right" >> logs/assembly_stats.txt
-    grep -A 10 "Assembly summary" $out/spades.log >> logs/assembly_stats.txt
+    echo "Assembly Statistics" > $LOG_DIR/assembly_stats.txt
+    echo "Date: $(date)" >> $LOG_DIR/assembly_stats.txt
+    echo "Input files: $left, $right" >> $LOG_DIR/assembly_stats.txt
+    grep -A 10 "Assembly summary" $out/spades.log >> $LOG_DIR/assembly_stats.txt
 else
     echo "Error: Assembly failed or transcripts.fasta not found!"
     exit 1

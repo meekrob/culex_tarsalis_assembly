@@ -7,17 +7,18 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --job-name=cat_merge
-#SBATCH --output=logs/mergefq_%j.out
-#SBATCH --error=logs/mergefq_%j.err
+# Log files will be specified when submitting the job
 
 # input file variables passed in as arguments from main_mosquito.sh
 R1_LIST=$1  # File containing list of R1 files to merge
 R2_LIST=$2  # File containing list of R2 files to merge
 OUT_R1=$3   # Output merged R1 file
 OUT_R2=$4   # Output merged R2 file
+LOG_DIR=${5:-"logs/02_merge"}  # Directory for logs
 
 # Create output directory if it doesn't exist
 mkdir -p $(dirname $OUT_R1)
+mkdir -p $LOG_DIR
 
 # activate conda env
 source ~/.bashrc

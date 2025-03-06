@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=32G
 #SBATCH --job-name=rnaquast
-#SBATCH --output=logs/rnaquast_%j.out
-#SBATCH --error=logs/rnaquast_%j.err
+# Log files will be specified when submitting the job
 
 # Source configuration
 source config/parameters.txt
@@ -19,9 +18,11 @@ OUT=$2       # Output directory
 left=$3      # R1 fastq file for read mapping
 right=$4     # R2 fastq file for read mapping
 other_opts=${5:-"${rnaQuast.opts}"}  # Additional options for rnaQuast
+LOG_DIR=${6:-"logs/04_rnaquast"}  # Directory for logs
 
-# Create output directory if it doesn't exist
+# Create necessary directories
 mkdir -p $OUT
+mkdir -p $LOG_DIR
 
 # activate conda env
 source ~/.bashrc

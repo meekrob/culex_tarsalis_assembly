@@ -7,8 +7,7 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=32G
 #SBATCH --job-name=busco
-#SBATCH --output=logs/busco_%j.out
-#SBATCH --error=logs/busco_%j.err
+# Log files will be specified when submitting the job
 
 # Source configuration
 source config/parameters.txt
@@ -18,11 +17,12 @@ TX_FASTA=$1  # Path to transcriptome assembly fasta file
 OUT=$2       # Output directory
 BUSCO_DOWNLOADS=${3:-"./busco_downloads"}  # Path to store BUSCO datasets
 ASSEMBLY_LABEL=${4:-"transcriptome"}  # Label for this assembly
+LOG_DIR=${5:-"logs/04_busco"}  # Directory for logs
 
-# Create output directory if it doesn't exist
+# Create necessary directories
 mkdir -p $OUT
 mkdir -p $BUSCO_DOWNLOADS
-mkdir -p logs
+mkdir -p $LOG_DIR
 
 # activate conda env
 source ~/.bashrc
@@ -59,9 +59,9 @@ if [[ -f "$SUMMARY_FILE" ]]; then
     cat $SUMMARY_FILE
     
     # Add to global BUSCO summary file
-    echo "Results for $ASSEMBLY_LABEL" >> logs/busco_summary.txt
-    cat $SUMMARY_FILE >> logs/busco_summary.txt
-    echo "-------------------" >> logs/busco_summary.txt
+    echo "Results for $ASSEMBLY_LABEL" >> $LOG_DIR/busco_summary.txt
+    cat $SUMMARY_FILE >> $LOG_DIR/busco_summary.txt
+    echo "-------------------" >> $LOG_DIR/busco_summary.txt
 else
     echo "Error: BUSCO analysis failed or summary file not found!"
     exit 1
