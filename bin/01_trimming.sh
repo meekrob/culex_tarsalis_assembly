@@ -29,9 +29,13 @@ for f in "$FILE" "$TWO"; do
 done
 
 # Create output directory if it doesn't exist
-mkdir -p $(dirname $TRIM1)
-mkdir -p htmls  # Create directory for HTML reports
+TRIM_DIR=$(dirname $TRIM1)
+mkdir -p $TRIM_DIR
 mkdir -p $LOG_DIR
+
+# Create reports directory inside the trimmed directory
+REPORTS_DIR="${TRIM_DIR}/reports"
+mkdir -p $REPORTS_DIR
 
 # activate conda env
 source ~/.bashrc
@@ -42,11 +46,16 @@ echo "Input R1: $FILE"
 echo "Input R2: $TWO"
 echo "Output R1: $TRIM1"
 echo "Output R2: $TRIM2"
+echo "Reports directory: $REPORTS_DIR"
 
 # run fastp with configurable parameters
+# Use sample name for the report files to avoid long filenames with paths
+HTML_REPORT="${REPORTS_DIR}/${SAMPLE_NAME}.html"
+JSON_REPORT="${REPORTS_DIR}/${SAMPLE_NAME}.json"
+
 cmd="fastp -i ${FILE} -I ${TWO} \
              -o ${TRIM1} -O ${TRIM2} \
-             -h htmls/$(basename $FILE).html -j htmls/$(basename $FILE).json \
+             -h ${HTML_REPORT} -j ${JSON_REPORT} \
              -w ${fastp_threads} ${fastp_opts}"
 echo "Executing command: $cmd"
 time eval $cmd
@@ -58,7 +67,7 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Check if output files were created
-for f in "$TRIM1" "$TRIM2"; do
+for f in "$TRIM1" "$TRIM2" "$HTML_REPORT" "$JSON_REPORT"; do
     if [[ ! -s "$f" ]]; then
         echo "Error: Output file $f is missing or empty!" >&2
         exit 1
@@ -74,4 +83,6 @@ echo "Reads after: $(zcat -f "$TRIM1" | wc -l | awk '{print $1/4}')" >> "$LOG_DI
 echo "-------------------" >> "$LOG_DIR/trim_summary.txt"
 
 # Results are stored in the path specified by TRIM1 and TRIM2
-# HTML and JSON reports are stored in the htmls directory
+# HTML and JSON reports are stored in the reports directory inside the trimmed directory
+echo "HTML report: $HTML_REPORT"
+echo "JSON report: $JSON_REPORT"
