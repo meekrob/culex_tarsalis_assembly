@@ -30,6 +30,10 @@ fi
 mkdir -p $(dirname $OUT_R1)
 mkdir -p $LOG_DIR
 
+# Create reports directory inside the trimmed directory
+REPORTS_DIR="$(dirname $OUT_R1)/reports"
+mkdir -p $REPORTS_DIR
+
 # Create a log file for this trimming job
 TRIM_LOG="$LOG_DIR/${SAMPLE_NAME}_$(date +%Y%m%d_%H%M%S).log"
 echo "Starting trimming job for $SAMPLE_NAME at $(date)" > $TRIM_LOG
@@ -47,9 +51,9 @@ fi
 # Run fastp
 echo "Running fastp for $SAMPLE_NAME..." | tee -a $TRIM_LOG
 
-# Set up fastp output files - directly in the trimmed directory
-HTML_REPORT="$(dirname $OUT_R1)/${SAMPLE_NAME}_fastp.html"
-JSON_REPORT="$(dirname $OUT_R1)/${SAMPLE_NAME}_fastp.json"
+# Set up fastp output files - in the reports subdirectory
+HTML_REPORT="$REPORTS_DIR/${SAMPLE_NAME}_fastp.html"
+JSON_REPORT="$REPORTS_DIR/${SAMPLE_NAME}_fastp.json"
 
 # Run fastp with appropriate parameters
 fastp \
