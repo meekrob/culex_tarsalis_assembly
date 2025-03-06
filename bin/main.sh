@@ -368,6 +368,35 @@ else
     echo "Trimming job IDs: ${trim_job_ids[*]}"
     echo "Merge dependency string: $trim_dependency"
     
+    # Add this before submitting the merge job
+    echo "Checking if file lists exist and have content:"
+    echo "R1 list path: $r1_trimmed_list"
+    echo "R2 list path: $r2_trimmed_list"
+
+    if [[ -f "$r1_trimmed_list" ]]; then
+        echo "R1 list exists. Content:"
+        cat "$r1_trimmed_list"
+    else
+        echo "ERROR: R1 list file does not exist!"
+        # Create the directory and an empty file
+        mkdir -p $(dirname "$r1_trimmed_list")
+        touch "$r1_trimmed_list"
+    fi
+
+    if [[ -f "$r2_trimmed_list" ]]; then
+        echo "R2 list exists. Content:"
+        cat "$r2_trimmed_list"
+    else
+        echo "ERROR: R2 list file does not exist!"
+        # Create the directory and an empty file
+        mkdir -p $(dirname "$r2_trimmed_list")
+        touch "$r2_trimmed_list"
+    fi
+
+    # Make sure the output directories exist
+    mkdir -p $(dirname "$merged_r1")
+    mkdir -p "$merge_logs"
+    
     # Submit merge job with appropriate dependencies
     if [[ "$valid_dependencies" == "true" ]]; then
         echo "Submitting merge job with dependency: $trim_dependency"

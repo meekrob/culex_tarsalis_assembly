@@ -120,7 +120,7 @@ merge_files $R2_LIST $OUT_R2 &
 pid2=$!
 
 # Wait for both to finish
-wait $pid1 $pid2
+wait $pid1
 r1_status=$?
 wait $pid2
 r2_status=$?
