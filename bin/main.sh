@@ -197,7 +197,7 @@ merged_r2="${merged_dir}/merged_R2.fastq.gz"
 # Create dependency for merge job
 merge_dependency=""
 if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-    merge_dependency="--dependency=afterok:"$(IFS=:; echo "${trim_job_ids[*]}")
+    merge_dependency="--dependency=afterany:"$(IFS=:; echo "${trim_job_ids[*]}")
 fi
 
 # Submit merge job
