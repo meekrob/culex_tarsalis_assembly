@@ -93,19 +93,12 @@ assembly_logs="${logs_base}/03_assembly"      # Logs for assembly
 busco_logs="${logs_base}/04_busco"            # Logs for BUSCO
 rnaquast_logs="${logs_base}/04_rnaquast"      # Logs for rnaQuast
 viz_logs="${logs_base}/05_visualization"      # Logs for visualization
-summary_logs="${logs_base}/summaries"         # Logs for summary reports
 
 # Create output and log directories
 mkdir -p "$trimmed_dir" "$merged_dir" "$assembly_dir" "$busco_dir" "$rnaquast_dir" \
          "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_dir"
 mkdir -p "$trim_logs" "$merge_logs" "$assembly_logs" "$busco_logs" "$rnaquast_logs" \
-         "$viz_logs" "$summary_logs"
-
-# Create summary file
-SUMMARY_FILE="${logs_base}/pipeline_summary.csv"
-echo "Step,Sample,Metric,Value" > "$SUMMARY_FILE"
-echo "Pipeline,Info,Start Time,$(date)" >> "$SUMMARY_FILE"
-echo "Pipeline,Info,Working Directory,$current_dir" >> "$SUMMARY_FILE"
+         "$viz_logs"
 
 # Create temporary directory for file lists
 temp_dir="${result_base}/temp"
@@ -156,9 +149,6 @@ track_failed_jobs() {
                 # Log the failure
                 echo "Job $job_id (Sample: ${samples[$i]}) failed" >> "$logs_base/failed_jobs.log"
                 echo "Failure time: $(date)" >> "$logs_base/failed_jobs.log"
-                
-                # Add to summary file
-                echo "Trimming,${samples[$i]},Status,Failed" >> "$SUMMARY_FILE"
             fi
         fi
     done
@@ -183,8 +173,6 @@ echo "Raw reads directory: $raw_reads_dir"
 echo "Results directory: $result_base"
 echo "Log files: $logs_base"
 echo "Debug mode: $debug_mode"
-echo "Summary file: $SUMMARY_FILE"
-echo "======================================="
 
 # Step 1: Identify read pairs
 echo "Identifying read pairs..."
@@ -264,18 +252,16 @@ for ((i=0; i<${#samples[@]}; i++)); do
     r2="${r2_files_array[$i]}"
     
     # Set output files for trimming
-    trim_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq"
-    trim_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq"
+    trimmed_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq.gz"
+    trimmed_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq.gz"
     
     # Add to the list of trimmed files for merging
-    echo "$trim_r1" >> $r1_trimmed_list
-    echo "$trim_r2" >> $r2_trimmed_list
+    echo "$trimmed_r1" >> $r1_trimmed_list
+    echo "$trimmed_r2" >> $r2_trimmed_list
     
     # Check if files already exist in debug mode
-    if [[ "$debug_mode" == "true" && -s "$trim_r1" && -s "$trim_r2" ]]; then
+    if [[ "$debug_mode" == "true" && -s "$trimmed_r1" && -s "$trimmed_r2" ]]; then
         echo "Debug mode: Trimmed files already exist for sample $sample. Skipping trimming job."
-        # Add entry to summary file
-        echo "Trimming,$sample,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
         continue
     fi
     
@@ -289,7 +275,7 @@ for ((i=0; i<${#samples[@]}; i++)); do
              --mem="${fastp_mem}" \
              --output="${trim_logs}/trim_${sample}_%j.out" \
              --error="${trim_logs}/trim_${sample}_%j.err" \
-             bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$trim_logs" "$SUMMARY_FILE" "$debug_mode")
+             bin/01_trimming.sh "$r1" "$r2" "$trimmed_r1" "$trimmed_r2" "$sample" "$trim_logs" "$debug_mode")
     
     # Check if job submission was successful
     if [[ $? -ne 0 || -z "$job_id" ]]; then
@@ -316,10 +302,10 @@ if [[ "$debug_mode" == "true" && ${#trim_job_ids[@]} -eq 0 ]]; then
     all_files_exist=true
     for ((i=0; i<${#samples[@]}; i++)); do
         sample="${samples[$i]}"
-        trim_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq"
-        trim_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq"
+        trimmed_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq.gz"
+        trimmed_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq.gz"
         
-        if [[ ! -s "$trim_r1" || ! -s "$trim_r2" ]]; then
+        if [[ ! -s "$trimmed_r1" || ! -s "$trimmed_r2" ]]; then
             echo "Error: Missing trimmed files for sample $sample in debug mode."
             all_files_exist=false
             break
@@ -335,14 +321,12 @@ fi
 # Step 2.2: Submit merging job (depends on all trimming jobs)
 echo "Preparing to submit merging job..."
 # Set output for merged files
-merged_r1="${merged_dir}/merged_R1.fastq"
-merged_r2="${merged_dir}/merged_R2.fastq"
+merged_r1="${merged_dir}/all_samples_R1.fastq.gz"
+merged_r2="${merged_dir}/all_samples_R2.fastq.gz"
 
 # Check if merge results already exist in debug mode
 if [[ "$debug_mode" == "true" && -s "$merged_r1" && -s "$merged_r2" ]]; then
     echo "Debug mode: Merged files already exist. Skipping merge job."
-    # Add entry to summary file
-    echo "Merging,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     merge_job_id="debug_skipped"
 else
     # Check for failed trimming jobs and log them
@@ -409,7 +393,7 @@ else
                       --dependency=$trim_dependency \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
-                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
+                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$debug_mode")
     else
         # If all trimming jobs were skipped in debug mode, submit without dependencies
         echo "All trimming jobs were skipped in debug mode. Submitting merge job without dependencies."
@@ -421,7 +405,7 @@ else
                       --mem="16G" \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
-                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
+                      bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$debug_mode")
     fi
     
     # Check if job submission was successful
@@ -452,8 +436,6 @@ assembly_transcripts="${assembly_dir}/transcripts.fasta"
 # Check if assembly already exists in debug mode
 if [[ "$debug_mode" == "true" && -s "$assembly_transcripts" ]]; then
     echo "Debug mode: Assembly file already exists. Skipping assembly job."
-    # Add entry to summary file
-    echo "Assembly,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     assembly_job_id="debug_skipped"
 else
     # Set up dependency for assembly job
@@ -468,7 +450,7 @@ else
                          --mem="${rnaSpades_mem}" \
                          --output="${assembly_logs}/assembly_%j.out" \
                          --error="${assembly_logs}/assembly_%j.err" \
-                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$SUMMARY_FILE" "$debug_mode")
+                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$debug_mode")
     else
         echo "Submitting assembly job with dependency on merge job: $merge_job_id"
         
@@ -481,7 +463,7 @@ else
                          --dependency=afterok:$merge_job_id \
                          --output="${assembly_logs}/assembly_%j.out" \
                          --error="${assembly_logs}/assembly_%j.err" \
-                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$SUMMARY_FILE" "$debug_mode")
+                         bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "${rnaSpades_opts}" "$assembly_logs" "$debug_mode")
     fi
     
     # Check if job submission was successful
@@ -506,8 +488,6 @@ echo "Preparing to submit quality assessment jobs..."
 busco_summary="${busco_dir}/short_summary.specific.${busco_lineage}.${busco_mode}.txt"
 if [[ "$debug_mode" == "true" && -s "$busco_summary" ]]; then
     echo "Debug mode: BUSCO summary already exists. Skipping BUSCO job."
-    # Add entry to summary file
-    echo "BUSCO,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     busco_job_id="debug_skipped"
 else
     # Set up dependency for BUSCO job
@@ -522,7 +502,7 @@ else
                       --mem="${busco_mem}" \
                       --output="${busco_logs}/busco_%j.out" \
                       --error="${busco_logs}/busco_%j.err" \
-                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$debug_mode")
     else
         echo "Submitting BUSCO job with dependency on assembly job: $assembly_job_id"
         
@@ -535,7 +515,7 @@ else
                       --dependency=afterok:$assembly_job_id \
                       --output="${busco_logs}/busco_%j.out" \
                       --error="${busco_logs}/busco_%j.err" \
-                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+                      bin/04_busco.sh "$assembly_transcripts" "$busco_dir" "./busco_downloads" "transcriptome" "$busco_logs" "$debug_mode")
     fi
     
     # Check if job submission was successful
@@ -557,8 +537,6 @@ fi
 rnaquast_report="${rnaquast_dir}/report.txt"
 if [[ "$debug_mode" == "true" && -s "$rnaquast_report" ]]; then
     echo "Debug mode: rnaQuast report already exists. Skipping rnaQuast job."
-    # Add entry to summary file
-    echo "rnaQuast,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     rnaquast_job_id="debug_skipped"
 else
     # Set up dependency for rnaQuast job
@@ -573,7 +551,7 @@ else
                          --mem="${rnaQuast_mem}" \
                          --output="${rnaquast_logs}/rnaquast_%j.out" \
                          --error="${rnaquast_logs}/rnaquast_%j.err" \
-                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$debug_mode")
     else
         echo "Submitting rnaQuast job with dependency on assembly job: $assembly_job_id"
         
@@ -586,7 +564,7 @@ else
                          --dependency=afterok:$assembly_job_id \
                          --output="${rnaquast_logs}/rnaquast_%j.out" \
                          --error="${rnaquast_logs}/rnaquast_%j.err" \
-                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+                         bin/04_rnaquast.sh "$assembly_transcripts" "$rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$debug_mode")
     fi
     
     # Check if job submission was successful
@@ -614,8 +592,6 @@ if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
     draft_busco_summary="${draft_busco_dir}/short_summary.specific.${busco_lineage}.draft_assembly.txt"
     if [[ "$debug_mode" == "true" && -s "$draft_busco_summary" ]]; then
         echo "Debug mode: Draft BUSCO summary already exists. Skipping draft BUSCO job."
-        # Add entry to summary file
-        echo "BUSCO,draft,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
         draft_busco_job_id="debug_skipped"
     else
         echo "Submitting BUSCO job for draft transcriptome"
@@ -627,7 +603,7 @@ if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
                             --mem="${busco_mem}" \
                             --output="${busco_logs}/draft_busco_%j.out" \
                             --error="${busco_logs}/draft_busco_%j.err" \
-                            bin/04_busco.sh "$draft_transcriptome" "$draft_busco_dir" "./busco_downloads" "draft_assembly" "$busco_logs" "$SUMMARY_FILE" "$debug_mode")
+                            bin/04_busco.sh "$draft_transcriptome" "$draft_busco_dir" "./busco_downloads" "draft_assembly" "$busco_logs" "$debug_mode")
         
         # Check if job submission was successful
         if [[ $? -ne 0 || -z "$draft_busco_job_id" ]]; then
@@ -642,8 +618,6 @@ if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
     draft_rnaquast_report="${draft_rnaquast_dir}/report.txt"
     if [[ "$debug_mode" == "true" && -s "$draft_rnaquast_report" ]]; then
         echo "Debug mode: Draft rnaQuast report already exists. Skipping draft rnaQuast job."
-        # Add entry to summary file
-        echo "rnaQuast,draft,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
         draft_rnaquast_job_id="debug_skipped"
     else
         echo "Submitting rnaQuast job for draft transcriptome"
@@ -655,7 +629,7 @@ if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
                                --mem="${rnaQuast_mem}" \
                                --output="${rnaquast_logs}/draft_rnaquast_%j.out" \
                                --error="${rnaquast_logs}/draft_rnaquast_%j.err" \
-                               bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$SUMMARY_FILE" "$debug_mode")
+                               bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2" "${rnaQuast_opts}" "$rnaquast_logs" "$debug_mode")
         
         # Check if job submission was successful
         if [[ $? -ne 0 || -z "$draft_rnaquast_job_id" ]]; then
@@ -673,8 +647,6 @@ echo "Preparing to submit visualization job..."
 viz_plot="${viz_dir}/combined_plot.pdf"
 if [[ "$debug_mode" == "true" && -s "$viz_plot" ]]; then
     echo "Debug mode: Visualization plot already exists. Skipping visualization job."
-    # Add entry to summary file
-    echo "Visualization,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     viz_job_id="debug_skipped"
 else
     # Create dependency string for visualization
@@ -698,7 +670,7 @@ else
                     --dependency=$viz_dependency \
                     --output="${viz_logs}/visualize_%j.out" \
                     --error="${viz_logs}/visualize_%j.err" \
-                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_logs")
+                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_logs" "$debug_mode")
     else
         viz_job_id=$(sbatch --parsable \
                     --partition="${visualize_partition}" \
@@ -709,7 +681,7 @@ else
                     --dependency=$viz_dependency \
                     --output="${viz_logs}/visualize_%j.out" \
                     --error="${viz_logs}/visualize_%j.err" \
-                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "" "" "$viz_logs")
+                    bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "" "" "$viz_logs" "$debug_mode")
     fi
     
     # Check if job submission was successful

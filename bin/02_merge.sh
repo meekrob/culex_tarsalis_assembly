@@ -15,8 +15,7 @@ R2_LIST=$2  # File containing list of R2 files to merge
 OUT_R1=$3   # Output merged R1 file
 OUT_R2=$4   # Output merged R2 file
 LOG_DIR=${5:-"logs/02_merge"}  # Directory for logs
-SUMMARY_FILE=${6:-"logs/pipeline_summary.csv"}  # Summary file path
-DEBUG_MODE=${7:-false}  # Debug mode flag
+DEBUG_MODE=${6:-false}  # Debug mode flag
 
 # Create output directory if it doesn't exist
 mkdir -p $(dirname $OUT_R1)
@@ -34,20 +33,6 @@ echo "Output R2: $OUT_R2" >> $MERGE_LOG
 if [[ "$DEBUG_MODE" == "true" && -s "$OUT_R1" && -s "$OUT_R2" ]]; then
     echo "Debug mode: Merged files already exist: $OUT_R1, $OUT_R2. Skipping merging." | tee -a $MERGE_LOG
     
-    # Add entry to summary file
-    echo "Merging,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
-    
-    # Extract some basic stats for the summary file
-    merged_r1_reads=$(zcat -f "$OUT_R1" | wc -l | awk '{print $1/4}')
-    merged_r2_reads=$(zcat -f "$OUT_R2" | wc -l | awk '{print $1/4}')
-    merged_r1_size=$(du -h "$OUT_R1" | cut -f1)
-    merged_r2_size=$(du -h "$OUT_R2" | cut -f1)
-    
-    echo "Merging,,Merged R1 Reads,$merged_r1_reads" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R2 Reads,$merged_r2_reads" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R1 Size,$merged_r1_size" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R2 Size,$merged_r2_size" >> "$SUMMARY_FILE"
-    
     exit 0
 fi
 
@@ -60,46 +45,65 @@ echo "Merging R2 files from list: $R2_LIST"
 echo "Output R1: $OUT_R1"
 echo "Output R2: $OUT_R2"
 
-# Function to merge files, handling missing files gracefully
+# Function to merge files and handle missing files
 merge_files() {
-    local list_file=$1
+    local file_list=$1
     local output_file=$2
-    local missing_count=0
-    local total_count=0
     local valid_files=""
+    local missing_files=0
     
-    echo "Processing file list: $list_file" | tee -a $MERGE_LOG
+    echo "Checking files in $file_list..." | tee -a $MERGE_LOG
     
     # Check each file in the list
-    while read file_path; do
-        ((total_count++))
-        if [[ -s "$file_path" ]]; then
-            echo "  File exists: $file_path" >> $MERGE_LOG
-            valid_files="$valid_files $file_path"
+    while IFS= read -r file; do
+        if [[ -s "$file" ]]; then
+            echo "  File exists: $file" >> $MERGE_LOG
+            valid_files="$valid_files $file"
         else
-            ((missing_count++))
-            echo "  WARNING: Missing or empty file: $file_path" | tee -a $MERGE_LOG
-            echo "Merging,,Missing File,$file_path" >> "$SUMMARY_FILE"
+            echo "  WARNING: Missing or empty file: $file" | tee -a $MERGE_LOG
+            missing_files=$((missing_files + 1))
         fi
-    done < $list_file
+    done < "$file_list"
     
-    echo "Found $missing_count missing files out of $total_count total files" | tee -a $MERGE_LOG
-    
-    if [[ $missing_count -eq $total_count ]]; then
-        echo "ERROR: All input files are missing! Cannot create $output_file" | tee -a $MERGE_LOG
-        echo "Merging,,Error,All input files missing for $(basename $output_file)" >> "$SUMMARY_FILE"
-        return 1
+    # Report missing files
+    if [[ $missing_files -gt 0 ]]; then
+        echo "WARNING: $missing_files files are missing or empty" | tee -a $MERGE_LOG
     fi
     
+    # If no valid files, exit with error
     if [[ -z "$valid_files" ]]; then
         echo "ERROR: No valid files to merge!" | tee -a $MERGE_LOG
         return 1
     fi
     
-    echo "Merging $((total_count - missing_count)) files into $output_file" | tee -a $MERGE_LOG
+    # Merge valid files - check if files are gzipped
+    echo "Merging $(echo $valid_files | wc -w) files into $output_file..." | tee -a $MERGE_LOG
     
-    # Use cat to merge the valid files
-    echo $valid_files | xargs cat > $output_file
+    # Check if first file is gzipped
+    first_file=$(echo $valid_files | awk '{print $1}')
+    if [[ "$first_file" == *.gz ]]; then
+        # For gzipped files
+        if [[ "$output_file" == *.gz ]]; then
+            # If output should be gzipped too
+            echo "Files are gzipped, using zcat for merging..." >> $MERGE_LOG
+            echo $valid_files | xargs zcat | gzip -c > $output_file
+        else
+            # If output should be uncompressed
+            echo "Files are gzipped, but output is uncompressed..." >> $MERGE_LOG
+            echo $valid_files | xargs zcat > $output_file
+        fi
+    else
+        # For uncompressed files
+        if [[ "$output_file" == *.gz ]]; then
+            # If output should be gzipped
+            echo "Files are uncompressed, but output is gzipped..." >> $MERGE_LOG
+            echo $valid_files | xargs cat | gzip -c > $output_file
+        else
+            # If both input and output are uncompressed
+            echo "Using cat for merging uncompressed files..." >> $MERGE_LOG
+            echo $valid_files | xargs cat > $output_file
+        fi
+    fi
     
     if [[ $? -eq 0 && -s "$output_file" ]]; then
         echo "Successfully created $output_file" | tee -a $MERGE_LOG
@@ -138,16 +142,8 @@ if [[ $r1_status -eq 0 && $r2_status -eq 0 ]]; then
     # Count reads in merged files
     merged_r1_reads=$(zcat -f "$OUT_R1" | wc -l | awk '{print $1/4}')
     merged_r2_reads=$(zcat -f "$OUT_R2" | wc -l | awk '{print $1/4}')
-    
-    # Add statistics to summary file
-    echo "Merging,,Status,Completed" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R1 Reads,$merged_r1_reads" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R2 Reads,$merged_r2_reads" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R1 Size,$merged_r1_size" >> "$SUMMARY_FILE"
-    echo "Merging,,Merged R2 Size,$merged_r2_size" >> "$SUMMARY_FILE"
 else
     echo "Error: Merging failed!" | tee -a $MERGE_LOG
-    echo "Merging,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 

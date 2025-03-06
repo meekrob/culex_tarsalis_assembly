@@ -4,107 +4,108 @@
 #SBATCH --partition=short-cpu
 #SBATCH --time=04:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
 #SBATCH --job-name=busco
 # Log files will be specified when submitting the job
 
-# input file variables passed in as arguments from main_mosquito.sh
-TX_FASTA=$1    # Transcriptome fasta file
-OUT=$2         # Output directory
-BUSCO_DOWNLOADS=${3:-"./busco_downloads"}  # Directory for BUSCO downloads
-ASSEMBLY_LABEL=${4:-"assembly"}  # Label for the assembly
-LOG_DIR=${5:-"logs/04_busco"}  # Directory for logs
-SUMMARY_FILE=${6:-"logs/pipeline_summary.csv"}  # Summary file path
-DEBUG_MODE=${7:-false}  # Debug mode flag
-
-# Source configuration
-source config/parameters.txt
+# input file variables passed in as arguments from main.sh
+TRANSCRIPTOME=$1
+OUTPUT_DIR=$2
+LOG_DIR=${3:-"logs/04_busco"}
+DEBUG_MODE=${4:-false}
 
 # Create output directory if it doesn't exist
-mkdir -p $OUT
+mkdir -p $OUTPUT_DIR
 mkdir -p $LOG_DIR
-mkdir -p $BUSCO_DOWNLOADS
+
+# Create a log file for this BUSCO job
+BUSCO_LOG="$LOG_DIR/busco_$(date +%Y%m%d_%H%M%S).log"
+echo "Starting BUSCO job at $(date)" > $BUSCO_LOG
+echo "Transcriptome: $TRANSCRIPTOME" >> $BUSCO_LOG
+echo "Output directory: $OUTPUT_DIR" >> $BUSCO_LOG
 
 # Debug mode: Check if output files already exist
-SUMMARY_FILE_PATH="$OUT/short_summary.specific.${busco_lineage}.${ASSEMBLY_LABEL}.txt"
-if [[ "$DEBUG_MODE" == "true" && -s "$SUMMARY_FILE_PATH" ]]; then
-    echo "Debug mode: BUSCO summary already exists: $SUMMARY_FILE_PATH. Skipping BUSCO analysis."
+if [[ "$DEBUG_MODE" == "true" && -d "$OUTPUT_DIR/run_diptera_odb10" && -f "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" ]]; then
+    echo "Debug mode: BUSCO output already exists: $OUTPUT_DIR/run_diptera_odb10/short_summary.txt. Skipping BUSCO." | tee -a $BUSCO_LOG
     
-    # Add entry to summary file
-    echo "BUSCO,$ASSEMBLY_LABEL,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
-    
-    # Extract key metrics from the summary file
-    if [[ -f "$SUMMARY_FILE_PATH" ]]; then
-        complete=$(grep "C:" "$SUMMARY_FILE_PATH" | cut -d'[' -f1 | awk '{print $1}')
-        single=$(grep "C:" "$SUMMARY_FILE_PATH" | awk '{print $2}' | tr -d 'S:')
-        duplicated=$(grep "C:" "$SUMMARY_FILE_PATH" | awk '{print $3}' | tr -d 'D:')
-        fragmented=$(grep "F:" "$SUMMARY_FILE_PATH" | awk '{print $1}' | tr -d 'F:')
-        missing=$(grep "M:" "$SUMMARY_FILE_PATH" | awk '{print $1}' | tr -d 'M:')
-        
-        echo "BUSCO,$ASSEMBLY_LABEL,Complete,$complete" >> "$SUMMARY_FILE"
-        echo "BUSCO,$ASSEMBLY_LABEL,Single Copy,$single" >> "$SUMMARY_FILE"
-        echo "BUSCO,$ASSEMBLY_LABEL,Duplicated,$duplicated" >> "$SUMMARY_FILE"
-        echo "BUSCO,$ASSEMBLY_LABEL,Fragmented,$fragmented" >> "$SUMMARY_FILE"
-        echo "BUSCO,$ASSEMBLY_LABEL,Missing,$missing" >> "$SUMMARY_FILE"
-    fi
+    # Remove summary file entries
+    # echo "BUSCO,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     
     exit 0
 fi
 
-# activate conda env
-source ~/.bashrc
-conda activate cellSquito
+# Check if input file exists
+if [[ ! -s "$TRANSCRIPTOME" ]]; then
+    echo "Error: Input transcriptome file is missing or empty!" | tee -a $BUSCO_LOG
+    echo "TRANSCRIPTOME: $TRANSCRIPTOME" | tee -a $BUSCO_LOG
+    
+    # Remove summary file entry
+    # echo "BUSCO,,Status,Failed (missing input)" >> "$SUMMARY_FILE"
+    
+    exit 1
+fi
 
-echo "Starting BUSCO analysis"
-echo "Transcriptome: $TX_FASTA"
-echo "Output directory: $OUT"
-echo "BUSCO downloads: $BUSCO_DOWNLOADS"
-echo "Assembly label: $ASSEMBLY_LABEL"
+# Run BUSCO
+echo "Running BUSCO..." | tee -a $BUSCO_LOG
 
-# run busco on the assembly from rnaspades using configurable parameters
-cmd="busco -i $TX_FASTA --download_path $BUSCO_DOWNLOADS --lineage_dataset ${busco_lineage} --mode ${busco_mode} --cpu $SLURM_CPUS_PER_TASK --out $ASSEMBLY_LABEL -f"
-echo "Executing command: $cmd"
-time eval $cmd
+# Get start time for timing
+start_time=$(date +%s)
 
-# Check if BUSCO was successful
-if [[ $? -ne 0 ]]; then
-    echo "Error: BUSCO failed!" >&2
-    echo "BUSCO,$ASSEMBLY_LABEL,Status,Failed" >> "$SUMMARY_FILE"
+# Run BUSCO with appropriate parameters
+busco \
+    -i "$TRANSCRIPTOME" \
+    -o "$(basename $OUTPUT_DIR)" \
+    -l diptera_odb10 \
+    -m transcriptome \
+    -c 8 \
+    --out_path "$(dirname $OUTPUT_DIR)" \
+    2>> $BUSCO_LOG
+
+# Check if BUSCO completed successfully
+if [[ $? -eq 0 && -f "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" ]]; then
+    end_time=$(date +%s)
+    runtime=$((end_time - start_time))
+    
+    echo "BUSCO completed successfully in $runtime seconds" | tee -a $BUSCO_LOG
+    
+    # Extract BUSCO statistics
+    complete=$(grep "Complete BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9.]\+%")
+    single=$(grep "Complete and single-copy BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9]\+")
+    duplicated=$(grep "Complete and duplicated BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9]\+")
+    fragmented=$(grep "Fragmented BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9]\+")
+    missing=$(grep "Missing BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9]\+")
+    total=$(grep "Total BUSCO groups searched" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -o "[0-9]\+")
+    
+    echo "Complete BUSCOs: $complete" | tee -a $BUSCO_LOG
+    echo "Complete and single-copy BUSCOs: $single" | tee -a $BUSCO_LOG
+    echo "Complete and duplicated BUSCOs: $duplicated" | tee -a $BUSCO_LOG
+    echo "Fragmented BUSCOs: $fragmented" | tee -a $BUSCO_LOG
+    echo "Missing BUSCOs: $missing" | tee -a $BUSCO_LOG
+    echo "Total BUSCO groups searched: $total" | tee -a $BUSCO_LOG
+    
+    # Remove summary file entries
+    # echo "BUSCO,,Status,Completed" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Complete,$complete" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Single-copy,$single" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Duplicated,$duplicated" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Fragmented,$fragmented" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Missing,$missing" >> "$SUMMARY_FILE"
+    # echo "BUSCO,,Total,$total" >> "$SUMMARY_FILE"
+else
+    echo "Error: BUSCO failed!" | tee -a $BUSCO_LOG
+    # echo "BUSCO,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 
 # Move BUSCO output to the specified output directory
-if [[ -d "$ASSEMBLY_LABEL" ]]; then
-    mv $ASSEMBLY_LABEL/* $OUT/
-    rmdir $ASSEMBLY_LABEL
+if [[ -d "$OUTPUT_DIR/run_diptera_odb10" ]]; then
+    mv $OUTPUT_DIR/run_diptera_odb10/* $OUTPUT_DIR/
+    rmdir $OUTPUT_DIR/run_diptera_odb10
 fi
 
-# Check if output files were created
-if [[ ! -s "$SUMMARY_FILE_PATH" ]]; then
-    echo "Error: BUSCO summary file is missing or empty!" >&2
-    echo "BUSCO,$ASSEMBLY_LABEL,Status,Failed (missing output)" >> "$SUMMARY_FILE"
-    exit 1
-fi
-
-echo "BUSCO analysis completed successfully!"
-
-# Extract key metrics from the summary file
-complete=$(grep "C:" "$SUMMARY_FILE_PATH" | cut -d'[' -f1 | awk '{print $1}')
-single=$(grep "C:" "$SUMMARY_FILE_PATH" | awk '{print $2}' | tr -d 'S:')
-duplicated=$(grep "C:" "$SUMMARY_FILE_PATH" | awk '{print $3}' | tr -d 'D:')
-fragmented=$(grep "F:" "$SUMMARY_FILE_PATH" | awk '{print $1}' | tr -d 'F:')
-missing=$(grep "M:" "$SUMMARY_FILE_PATH" | awk '{print $1}' | tr -d 'M:')
-
-# Add BUSCO statistics to summary file
-echo "BUSCO,$ASSEMBLY_LABEL,Status,Completed" >> "$SUMMARY_FILE"
-echo "BUSCO,$ASSEMBLY_LABEL,Complete,$complete" >> "$SUMMARY_FILE"
-echo "BUSCO,$ASSEMBLY_LABEL,Single Copy,$single" >> "$SUMMARY_FILE"
-echo "BUSCO,$ASSEMBLY_LABEL,Duplicated,$duplicated" >> "$SUMMARY_FILE"
-echo "BUSCO,$ASSEMBLY_LABEL,Fragmented,$fragmented" >> "$SUMMARY_FILE"
-echo "BUSCO,$ASSEMBLY_LABEL,Missing,$missing" >> "$SUMMARY_FILE"
-
-echo "BUSCO results saved to $OUT"
-echo "BUSCO summary file: $SUMMARY_FILE_PATH"
+echo "BUSCO results saved to $OUTPUT_DIR"
+echo "BUSCO summary file: $OUTPUT_DIR/run_diptera_odb10/short_summary.txt"
 
 # output error and log files to logs directory _jobid. err and .out respectively
