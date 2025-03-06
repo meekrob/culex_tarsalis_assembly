@@ -1,8 +1,0 @@
-name: fastp
-channels:
-  - defaults
-  - conda-forge
-  - bioconda
-dependencies:
-  - fastp
-prefix: /nfs/home/dking/miniconda3/envs/fastp
