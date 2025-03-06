@@ -11,9 +11,6 @@
 # Source conda
 source ~/.bashrc
 
-# Source parameters file
-source config/parameters.txt
-
 # Define base directories
 current_dir=$(pwd)
 data_base="${current_dir}/data"
@@ -67,7 +64,7 @@ debug_mode=false
 # Check for command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --debug)
+        --debug|-d)
             debug_mode=true
             shift
             ;;
