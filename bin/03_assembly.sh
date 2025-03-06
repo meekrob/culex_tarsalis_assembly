@@ -1,8 +1,8 @@
-#! /bin/bash
+#!/bin/bash
 
 # slurm parameters, see config/parameters.txt
 #SBATCH --partition=week-long-highmem
-#SBATCH --time=168:00:00  # Changed from 7-00:00:00 to 168:00:00 (7 days in hours)
+#SBATCH --time=168:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=250G
@@ -15,6 +15,7 @@ MERGED_R2=$2
 OUTPUT_DIR=$3
 LOG_DIR=${4:-"logs/03_assembly"}
 DEBUG_MODE=${5:-false}
+SUMMARY_FILE=${6:-"logs/pipeline_summary.csv"}
 
 # Create output directory if it doesn't exist
 mkdir -p $OUTPUT_DIR
@@ -27,10 +28,12 @@ echo "Merged R1: $MERGED_R1" >> $ASSEMBLY_LOG
 echo "Merged R2: $MERGED_R2" >> $ASSEMBLY_LOG
 echo "Output directory: $OUTPUT_DIR" >> $ASSEMBLY_LOG
 
-# Debug mode: Check if output files already exist
+# Debug mode: Check if output files already exist - VERY IMPORTANT to check for the file
 if [[ "$DEBUG_MODE" == "true" && -s "$OUTPUT_DIR/transcripts.fasta" ]]; then
     echo "Debug mode: Assembly output already exists: $OUTPUT_DIR/transcripts.fasta. Skipping assembly." | tee -a $ASSEMBLY_LOG
     
+    # Add entry to summary
+    echo "Assembly,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     exit 0
 fi
 
@@ -40,8 +43,14 @@ if [[ ! -s "$MERGED_R1" || ! -s "$MERGED_R2" ]]; then
     echo "MERGED_R1: $MERGED_R1 ($(du -h $MERGED_R1 2>/dev/null || echo 'missing'))" | tee -a $ASSEMBLY_LOG
     echo "MERGED_R2: $MERGED_R2 ($(du -h $MERGED_R2 2>/dev/null || echo 'missing'))" | tee -a $ASSEMBLY_LOG
     
+    # Add error to summary
+    echo "Assembly,,Status,Failed (missing input)" >> "$SUMMARY_FILE"
     exit 1
 fi
+
+# Activate conda
+source ~/.bashrc
+conda activate cellSquito
 
 # Run rnaSPAdes
 echo "Running rnaSPAdes..." | tee -a $ASSEMBLY_LOG
@@ -49,13 +58,19 @@ echo "Running rnaSPAdes..." | tee -a $ASSEMBLY_LOG
 # Get start time for timing
 start_time=$(date +%s)
 
+# Set up temporary directory
+TMP="${TMPDIR:-$HOME/tmp}"
+mkdir -p $TMP
+export TMPDIR=$TMP
+echo "Using temporary directory: $TMPDIR" | tee -a $ASSEMBLY_LOG
+
 # Run rnaSPAdes with appropriate parameters
 rnaspades.py \
     --rna \
     -1 "$MERGED_R1" \
     -2 "$MERGED_R2" \
     -o "$OUTPUT_DIR" \
-    -t 64 \
+    -t $SLURM_CPUS_PER_TASK \
     -m 64 \
     2>> $ASSEMBLY_LOG
 
@@ -73,8 +88,15 @@ if [[ $? -eq 0 && -s "$OUTPUT_DIR/transcripts.fasta" ]]; then
     
     echo "Number of transcripts: $num_transcripts" | tee -a $ASSEMBLY_LOG
     echo "Assembly size: $assembly_size_mb Mb" | tee -a $ASSEMBLY_LOG
+    
+    # Add to summary file
+    echo "Assembly,,Status,Completed" >> "$SUMMARY_FILE"
+    echo "Assembly,,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
+    echo "Assembly,,Transcripts,$num_transcripts" >> "$SUMMARY_FILE"
+    echo "Assembly,,Size,$assembly_size_mb Mb" >> "$SUMMARY_FILE"
 else
     echo "Error: Assembly failed!" | tee -a $ASSEMBLY_LOG
+    echo "Assembly,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 
