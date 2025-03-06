@@ -121,21 +121,60 @@ check_job_status() {
     local job_name=$2
     local max_attempts=5
     local attempt=1
-    local wait_time=2
+    local sleep_time=2
     
     while [[ $attempt -le $max_attempts ]]; do
         if squeue -j "$job_id" &>/dev/null; then
-            echo "Job $job_name (ID: $job_id) is in the queue."
+            echo "Job $job_name (ID: $job_id) successfully submitted and in queue."
             return 0
         fi
-        echo "Attempt $attempt: Job $job_name (ID: $job_id) not found in queue. Waiting ${wait_time}s..."
-        sleep $wait_time
-        wait_time=$((wait_time * 2))  # Exponential backoff
-        attempt=$((attempt + 1))
+        
+        echo "Waiting for job $job_name (ID: $job_id) to appear in queue (attempt $attempt/$max_attempts)..."
+        sleep $sleep_time
+        ((attempt++))
+        ((sleep_time*=2))  # Exponential backoff
     done
     
     echo "Warning: Job $job_name (ID: $job_id) not found in queue after $max_attempts attempts."
     return 1
+}
+
+# Add this function to track and log failed jobs
+track_failed_jobs() {
+    local job_ids=("$@")
+    local failed_jobs=()
+    local failed_samples=()
+    
+    for ((i=0; i<${#job_ids[@]}; i++)); do
+        local job_id="${job_ids[$i]}"
+        if [[ "$job_id" != "debug_skipped" ]]; then
+            local state=$(sacct -j "$job_id" --format=State -n | head -1 | tr -d ' ')
+            if [[ "$state" == "FAILED" ]]; then
+                failed_jobs+=("$job_id")
+                failed_samples+=("${samples[$i]}")
+                
+                # Log the failure
+                echo "Job $job_id (Sample: ${samples[$i]}) failed" >> "$logs_base/failed_jobs.log"
+                echo "Failure time: $(date)" >> "$logs_base/failed_jobs.log"
+                
+                # Add to summary file
+                echo "Trimming,${samples[$i]},Status,Failed" >> "$SUMMARY_FILE"
+            fi
+        fi
+    done
+    
+    if [[ ${#failed_jobs[@]} -gt 0 ]]; then
+        echo "Warning: The following jobs failed:"
+        for ((i=0; i<${#failed_jobs[@]}; i++)); do
+            echo "  Job ID: ${failed_jobs[$i]} - Sample: ${failed_samples[$i]}"
+        done
+        echo "These failures have been logged to $logs_base/failed_jobs.log"
+        echo "The pipeline will continue using afterany dependencies, but some samples may be missing."
+        
+        return 1
+    fi
+    
+    return 0
 }
 
 # Print pipeline information
@@ -299,37 +338,58 @@ echo "Preparing to submit merging job..."
 merged_r1="${merged_dir}/merged_R1.fastq"
 merged_r2="${merged_dir}/merged_R2.fastq"
 
-# Check if merged files already exist in debug mode
+# Check if merge results already exist in debug mode
 if [[ "$debug_mode" == "true" && -s "$merged_r1" && -s "$merged_r2" ]]; then
-    echo "Debug mode: Merged files already exist. Skipping merging job."
+    echo "Debug mode: Merged files already exist. Skipping merge job."
     # Add entry to summary file
     echo "Merging,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     merge_job_id="debug_skipped"
 else
-    # Create dependency string for merge job to wait for all trimming jobs
-    if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-        trim_dependency=$(IFS=:; echo "afterok:${trim_job_ids[*]}")
-        echo "Submitting merging job with dependency: $trim_dependency"
-        
+    # Check for failed trimming jobs and log them
+    echo "Checking for failed trimming jobs..."
+    track_failed_jobs "${trim_job_ids[@]}"
+    
+    # Create a dependency string for the merge job using afterany
+    trim_dependency=""
+    valid_dependencies=false
+    
+    # Check if any trimming jobs were actually submitted (not skipped in debug mode)
+    for job_id in "${trim_job_ids[@]}"; do
+        if [[ -n "$job_id" && "$job_id" != "debug_skipped" ]]; then
+            valid_dependencies=true
+            if [[ -z "$trim_dependency" ]]; then
+                trim_dependency="afterany:$job_id"
+            else
+                trim_dependency="${trim_dependency}:$job_id"
+            fi
+        fi
+    done
+    
+    echo "Trimming job IDs: ${trim_job_ids[*]}"
+    echo "Merge dependency string: $trim_dependency"
+    
+    # Submit merge job with appropriate dependencies
+    if [[ "$valid_dependencies" == "true" ]]; then
+        echo "Submitting merge job with dependency: $trim_dependency"
         merge_job_id=$(sbatch --parsable \
-                      --partition="${cat_partition}" \
-                      --time="${cat_time}" \
-                      --nodes=${cat_nodes} \
-                      --cpus-per-task=${cat_cpu_cores_per_task} \
-                      --mem="${cat_mem}" \
+                      --partition="${merge_partition}" \
+                      --time="${merge_time}" \
+                      --nodes=${merge_nodes} \
+                      --cpus-per-task=${merge_cpu_cores_per_task} \
+                      --mem="${merge_mem}" \
                       --dependency=$trim_dependency \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
                       bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
     else
-        echo "Debug mode: No trimming jobs to depend on. Submitting merge job without dependencies."
-        
+        # If all trimming jobs were skipped in debug mode, submit without dependencies
+        echo "All trimming jobs were skipped in debug mode. Submitting merge job without dependencies."
         merge_job_id=$(sbatch --parsable \
-                      --partition="${cat_partition}" \
-                      --time="${cat_time}" \
-                      --nodes=${cat_nodes} \
-                      --cpus-per-task=${cat_cpu_cores_per_task} \
-                      --mem="${cat_mem}" \
+                      --partition="${merge_partition}" \
+                      --time="${merge_time}" \
+                      --nodes=${merge_nodes} \
+                      --cpus-per-task=${merge_cpu_cores_per_task} \
+                      --mem="${merge_mem}" \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
                       bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
@@ -337,18 +397,24 @@ else
     
     # Check if job submission was successful
     if [[ $? -ne 0 || -z "$merge_job_id" ]]; then
-        echo "Error: Failed to submit merging job"
+        echo "Error: Failed to submit merge job"
         exit 1
     fi
     
-    echo "  Merge job ID: $merge_job_id"
-    
     # Verify job was submitted correctly
+    echo "Waiting for merge job to appear in queue..."
+    sleep 2  # Give SLURM a moment to register the job
+    
     if ! check_job_status "$merge_job_id" "merge"; then
-        echo "Warning: Job verification failed for merging job $merge_job_id"
-        # Continue anyway, as the job might still be in queue
+        echo "Warning: Merge job $merge_job_id not found in queue. This might indicate a problem with job dependencies."
+        echo "Checking job status..."
+        sacct -j "$merge_job_id" --format=JobID,State,ExitCode
+    else
+        echo "Merge job successfully submitted and in queue."
     fi
 fi
+
+echo "  Merge job ID: $merge_job_id"
 
 # Step 2.3: Submit assembly job (depends on merging job)
 echo "Preparing to submit assembly job..."
