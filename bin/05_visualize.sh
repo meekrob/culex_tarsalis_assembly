@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# slurm parameters - no specific parameters in the config file, using standard values
+# slurm parameters from config/parameters.txt
 #SBATCH --partition=short-cpu
 #SBATCH --time=00:30:00
 #SBATCH --nodes=1
@@ -10,10 +10,16 @@
 #SBATCH --output=logs/visualize_%j.out
 #SBATCH --error=logs/visualize_%j.err
 
+# Source configuration
+source config/parameters.txt
+
 # input file variables passed in as arguments from main_mosquito.sh
 BUSCO_DIR=$1     # Directory with BUSCO results
 RNAQUAST_DIR=$2  # Directory with rnaQuast results
 OUT_DIR=$3       # Output directory for visualizations
+# Optional arguments for draft transcriptome comparison
+DRAFT_BUSCO_DIR=${4:-""}  # Draft BUSCO results
+DRAFT_RNAQUAST_DIR=${5:-""}  # Draft rnaQuast results
 
 # Create output directory if it doesn't exist
 mkdir -p $OUT_DIR
@@ -27,8 +33,15 @@ echo "BUSCO results: $BUSCO_DIR"
 echo "rnaQuast results: $RNAQUAST_DIR"
 echo "Output directory: $OUT_DIR"
 
-# Run R script for visualization
-Rscript bin/visualize.R "$BUSCO_DIR" "$RNAQUAST_DIR" "$OUT_DIR"
+# Add draft transcriptome arguments if provided
+if [[ -n "$DRAFT_BUSCO_DIR" && -n "$DRAFT_RNAQUAST_DIR" ]]; then
+    echo "Draft BUSCO results: $DRAFT_BUSCO_DIR"
+    echo "Draft rnaQuast results: $DRAFT_RNAQUAST_DIR"
+    Rscript bin/visualize.R "$BUSCO_DIR" "$RNAQUAST_DIR" "$OUT_DIR" "$DRAFT_BUSCO_DIR" "$DRAFT_RNAQUAST_DIR"
+else
+    # Run R script for visualization (no draft)
+    Rscript bin/visualize.R "$BUSCO_DIR" "$RNAQUAST_DIR" "$OUT_DIR"
+fi
 
 # Check if visualization completed successfully
 if [[ $? -eq 0 ]]; then

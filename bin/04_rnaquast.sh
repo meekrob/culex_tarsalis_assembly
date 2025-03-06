@@ -10,12 +10,15 @@
 #SBATCH --output=logs/rnaquast_%j.out
 #SBATCH --error=logs/rnaquast_%j.err
 
+# Source configuration
+source config/parameters.txt
+
 # input file variables passed in as arguments from main_mosquito.sh
 ASSEMBLY=$1  # Path to the assembly fasta file
 OUT=$2       # Output directory
 left=$3      # R1 fastq file for read mapping
 right=$4     # R2 fastq file for read mapping
-other_opts=${5:-""}  # Additional options for rnaQuast
+other_opts=${5:-"${rnaQuast.opts}"}  # Additional options for rnaQuast
 
 # Create output directory if it doesn't exist
 mkdir -p $OUT
@@ -43,7 +46,7 @@ if [[ ! -f "$left" || ! -f "$right" ]]; then
 fi
 
 # run rnaquast on the assembly from rnaspades
-cmd="rnaquast.py --transcripts $ASSEMBLY -t $SLURM_CPUS_PER_TASK -o $OUT -1 $left -2 $right $other_opts"
+cmd="rnaquast.py --transcripts $ASSEMBLY -t ${rnaQuast.threads} -o $OUT -1 $left -2 $right $other_opts"
 echo "Executing command: $cmd"
 time eval $cmd
 

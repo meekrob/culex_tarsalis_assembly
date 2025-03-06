@@ -8,6 +8,9 @@ fastp.time=01:00:00
 fastp.nodes=1
 fastp.cpu-cores-per-task=17
 fastp.mem=8G
+# fastp tool parameters
+fastp.threads=$((SLURM_CPUS_PER_TASK-1))
+fastp.opts="--dedup"
 
 # cat job parameters
 cat.partition=short-cpu
@@ -22,6 +25,9 @@ rnaSpades.time=7:00:00:00
 rnaSpades.nodes=2
 rnaSpades.cpu-cores-per-task=32
 rnaSpades.mem=250GB 	# Might need more 
+# rnaSpades tool parameters
+rnaSpades.threads=$SLURM_CPUS_PER_TASK
+rnaSpades.opts=""
 
 # busco job parameters
 busco.partition=short-cpu
@@ -29,6 +35,9 @@ busco.time=01:00:00
 busco.nodes=1
 busco.cpu-cores-per-task=24
 busco.mem=32G
+# busco tool parameters
+busco.lineage="diptera_odb10"
+busco.mode="transcriptome"
 
 # rnaQuast job parameters
 rnaQuast.partition=short-cpu
@@ -36,5 +45,15 @@ rnaQuast.time=01:00:00
 rnaQuast.nodes=1
 rnaQuast.cpu-cores-per-task=24
 rnaQuast.mem=32G
+# rnaQuast tool parameters
+rnaQuast.threads=$SLURM_CPUS_PER_TASK
+rnaQuast.opts=""
+
+# visualization job parameters
+visualize.partition=short-cpu
+visualize.time=00:30:00
+visualize.nodes=1
+visualize.cpu-cores-per-task=1
+visualize.mem=4G
 
 

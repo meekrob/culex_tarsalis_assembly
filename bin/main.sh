@@ -8,6 +8,9 @@
 # Source conda
 source ~/.bashrc
 
+# Source parameters file
+source config/parameters.txt
+
 # Check if the conda environment exists and create it only if needed
 if ! conda info --envs | grep -q "cellSquito"; then
     echo "Creating cellSquito conda environment..."
@@ -17,8 +20,9 @@ else
 fi
 
 # Define directories (adjust these as needed)
-raw_reads_dir="${1:-/data/raw_reads}"  # Directory with raw fastq files
-result_base="${2:-/results}"           # Base directory for all results
+raw_reads_dir="${1:-/data/raw_reads}"         # Directory with raw fastq files
+result_base="${2:-/results}"                  # Base directory for all results
+draft_transcriptome="${3:-input/draft_transcriptome/draft.fasta}"  # Path to draft transcriptome (optional)
 
 # Create more specific output directories
 trimmed_dir="${result_base}/01_trimmed"         # Directory for fastp output
@@ -27,11 +31,14 @@ assembly_dir="${result_base}/03_assembly"       # Output directory for rnaSpades
 quality_dir="${result_base}/04_quality"         # Parent directory for quality results
 busco_dir="${quality_dir}/busco"                # Output directory for busco
 rnaquast_dir="${quality_dir}/rnaquast"          # Output directory for rnaquast
+draft_busco_dir="${quality_dir}/draft_busco"    # BUSCO results for draft transcriptome
+draft_rnaquast_dir="${quality_dir}/draft_rnaquast"  # rnaQuast results for draft
 viz_dir="${result_base}/05_visualization"       # Output directory for visualizations
 logs_dir="${result_base}/logs"                  # Directory for all log files
 
 # Create output directories
-mkdir -p "$trimmed_dir" "$merged_dir" "$assembly_dir" "$busco_dir" "$rnaquast_dir" "$viz_dir" "$logs_dir"
+mkdir -p "$trimmed_dir" "$merged_dir" "$assembly_dir" "$busco_dir" "$rnaquast_dir" \
+         "$draft_busco_dir" "$draft_rnaquast_dir" "$viz_dir" "$logs_dir"
 
 # Create temporary directory for file lists
 tmp_dir="${result_base}/tmp"
@@ -41,6 +48,9 @@ echo "===== Mosquito RNA-Seq Pipeline ====="
 echo "Raw reads directory: $raw_reads_dir"
 echo "Results directory: $result_base"
 echo "Log files: $logs_dir"
+if [[ -f "$draft_transcriptome" ]]; then
+    echo "Draft transcriptome: $draft_transcriptome"
+fi
 echo "======================================="
 
 ### Step 1: Parse Raw Reads and Identify Pairs
@@ -56,6 +66,8 @@ samples=()
 r1_files_array=()
 r2_files_array=()
 
+# Enhanced documentation for read pairing logic
+echo "Pairing read files based on naming patterns..."
 for r1_file in "${R1_files[@]}"; do
     # Extract the filename without the path
     filename=$(basename "$r1_file")
@@ -93,6 +105,12 @@ for ((i=0; i<${#samples[@]}; i++)); do
     echo "  R2: $(basename "${r2_files_array[$i]}")"
 done
 
+# Check if any read pairs were found
+if [[ ${#samples[@]} -eq 0 ]]; then
+    echo "Error: No read pairs found in $raw_reads_dir"
+    exit 1
+fi
+
 ### Step 2: Submit jobs
 # Create file lists for later job submissions
 r1_trimmed_list="${tmp_dir}/r1_trimmed_files.txt"
@@ -119,8 +137,8 @@ for ((i=0; i<${#samples[@]}; i++)); do
     echo "$trim_r2" >> $r2_trimmed_list
     
     echo "Submitting trimming job for sample $sample"
-    # Submit trimming job
-    job_id=$(sbatch --parsable bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample")
+    # Submit trimming job with logs directory
+    job_id=$(sbatch --parsable bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$logs_dir")
     trim_job_ids+=($job_id)
     echo "  Job ID: $job_id"
 done
@@ -152,7 +170,7 @@ assembly_fasta="${assembly_dir}/transcripts.fasta"
 
 # Submit BUSCO job
 echo "Submitting BUSCO job with dependency: afterok:$assembly_job_id"
-busco_job_id=$(sbatch --parsable --dependency=afterok:$assembly_job_id bin/04_busco.sh "$assembly_fasta" "$busco_dir")
+busco_job_id=$(sbatch --parsable --dependency=afterok:$assembly_job_id bin/04_busco.sh "$assembly_fasta" "$busco_dir" "./busco_downloads" "new_assembly")
 echo "  BUSCO job ID: $busco_job_id"
 
 # Submit rnaQuast job
@@ -160,11 +178,31 @@ echo "Submitting rnaQuast job with dependency: afterok:$assembly_job_id"
 rnaquast_job_id=$(sbatch --parsable --dependency=afterok:$assembly_job_id bin/04_rnaquast.sh "$assembly_fasta" "$rnaquast_dir" "$merged_r1" "$merged_r2")
 echo "  rnaQuast job ID: $rnaquast_job_id"
 
-# Step 2.5: Submit visualization job (depends on both quality assessment jobs)
+# Draft transcriptome analysis (if available)
+draft_busco_job_id=""
+draft_rnaquast_job_id=""
+if [[ -n "$draft_transcriptome" && -f "$draft_transcriptome" ]]; then
+    echo "Found draft transcriptome: $draft_transcriptome"
+    echo "Submitting BUSCO job for draft transcriptome"
+    draft_busco_job_id=$(sbatch --parsable bin/04_busco.sh "$draft_transcriptome" "$draft_busco_dir" "./busco_downloads" "draft_assembly")
+    echo "  Draft BUSCO job ID: $draft_busco_job_id"
+
+    echo "Submitting rnaQuast job for draft transcriptome"
+    draft_rnaquast_job_id=$(sbatch --parsable bin/04_rnaquast.sh "$draft_transcriptome" "$draft_rnaquast_dir" "$merged_r1" "$merged_r2")
+    echo "  Draft rnaQuast job ID: $draft_rnaquast_job_id"
+fi
+
+# Step 2.5: Submit visualization job (depends on all quality assessment jobs)
 echo "Preparing to submit visualization job..."
-quality_dependency="afterok:$busco_job_id:$rnaquast_job_id"
-echo "Submitting visualization job with dependency: $quality_dependency"
-viz_job_id=$(sbatch --parsable --dependency=$quality_dependency bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir")
+# Create dependency string for visualization - include draft jobs if they exist
+if [[ -n "$draft_busco_job_id" && -n "$draft_rnaquast_job_id" ]]; then
+    quality_dependency="afterok:$busco_job_id:$rnaquast_job_id:$draft_busco_job_id:$draft_rnaquast_job_id"
+    # Pass both new and draft directories
+    viz_job_id=$(sbatch --parsable --dependency=$quality_dependency bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "$draft_busco_dir" "$draft_rnaquast_dir")
+else
+    quality_dependency="afterok:$busco_job_id:$rnaquast_job_id"
+    viz_job_id=$(sbatch --parsable --dependency=$quality_dependency bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir")
+fi
 echo "  Visualization job ID: $viz_job_id"
 
 # Print job summary
@@ -174,6 +212,12 @@ echo "Merging job: $merge_job_id"
 echo "Assembly job: $assembly_job_id"
 echo "BUSCO job: $busco_job_id"
 echo "rnaQuast job: $rnaquast_job_id"
+if [[ -n "$draft_busco_job_id" ]]; then
+    echo "Draft BUSCO job: $draft_busco_job_id"
+fi
+if [[ -n "$draft_rnaquast_job_id" ]]; then
+    echo "Draft rnaQuast job: $draft_rnaquast_job_id"
+fi
 echo "Visualization job: $viz_job_id"
 echo "======================="
 

@@ -22,10 +22,20 @@ conda create -f config/cellSquito.yml -n cellSquito
 ```
 3. Run the main script
 ```
-sbatch scripts/main.sh
+# Basic usage
+sbatch bin/main.sh
+
+# With custom input and output directories
+sbatch bin/main.sh /path/to/raw_reads /path/to/results
+
+# With a reference transcriptome for comparison
+sbatch bin/main.sh -R /path/to/reference/transcriptome
+
+# With all options
+sbatch bin/main.sh -R /path/to/reference/transcriptome /path/to/raw_reads /path/to/results
 ```
 
-***Note*** - the rna files and reference transcriptome need to be added to input directories & the slurm parameters may need to configured in the config/parameters.txt 
+***Note*** - the RNA-seq files need to be in the input directories & the slurm parameters may need to be configured in the config/parameters.txt file
 
 
 
