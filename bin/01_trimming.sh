@@ -4,48 +4,52 @@
 #SBATCH --partition=short-cpu
 #SBATCH --time=01:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --job-name=fastp_trim
+#SBATCH --job-name=fastp
 # Log files will be specified when submitting the job
 
-# Source configuration
-source config/parameters.txt
+# activate conda env
+source ~/.bashrc
+conda activate cellSquito
 
 # input file variables passed in as arguments from main.sh
-FILE=$1    # R1 input file
-TWO=$2     # R2 input file  
-TRIM1=$3   # R1 output file
-TRIM2=$4   # R2 output file
-SAMPLE_NAME=$5  # Sample name for logs/reporting
-LOG_DIR=${6:-"logs/01_trimming"}  # Directory for logs
-SUMMARY_FILE=${7:-"logs/pipeline_summary.csv"}  # Summary file path
-DEBUG_MODE=${8:-false}  # Debug mode flag
+R1=$1
+R2=$2
+OUT_R1=$3
+OUT_R2=$4
+SAMPLE_NAME=$5
+LOG_DIR=${6:-"logs/01_trimming"}
+SUMMARY_FILE=${7:-"logs/pipeline_summary.csv"}
+DEBUG_MODE=${8:-false}
 
-# Enhance input validation
-for f in "$FILE" "$TWO"; do
-    if [[ ! -f "$f" ]]; then
-        echo "Error: Input file $f not found!" >&2
-        exit 1
-    fi
-done
+# Ensure output files have .gz extension
+if [[ ! "$OUT_R1" == *.gz ]]; then
+    OUT_R1="${OUT_R1}.gz"
+fi
+if [[ ! "$OUT_R2" == *.gz ]]; then
+    OUT_R2="${OUT_R2}.gz"
+fi
 
 # Create output directory if it doesn't exist
-TRIM_DIR=$(dirname $TRIM1)
-mkdir -p $TRIM_DIR
+mkdir -p $(dirname $OUT_R1)
 mkdir -p $LOG_DIR
 
 # Create reports directory inside the trimmed directory
-REPORTS_DIR="${TRIM_DIR}/reports"
+REPORTS_DIR="$(dirname $OUT_R1)/reports"
 mkdir -p $REPORTS_DIR
 
-# Set HTML and JSON report paths
-HTML_REPORT="${REPORTS_DIR}/${SAMPLE_NAME}_fastp.html"
-JSON_REPORT="${REPORTS_DIR}/${SAMPLE_NAME}_fastp.json"
+# Create a log file for this trimming job
+TRIM_LOG="$LOG_DIR/${SAMPLE_NAME}_$(date +%Y%m%d_%H%M%S).log"
+echo "Starting trimming job for $SAMPLE_NAME at $(date)" > $TRIM_LOG
+echo "R1: $R1" >> $TRIM_LOG
+echo "R2: $R2" >> $TRIM_LOG
+echo "Output R1: $OUT_R1" >> $TRIM_LOG
+echo "Output R2: $OUT_R2" >> $TRIM_LOG
 
 # Debug mode: Check if output files already exist
-if [[ "$DEBUG_MODE" == "true" && -s "$TRIM1" && -s "$TRIM2" ]]; then
-    echo "Debug mode: Trimmed files already exist for $SAMPLE_NAME: $TRIM1, $TRIM2. Skipping trimming."
+if [[ "$DEBUG_MODE" == "true" && -s "$OUT_R1" && -s "$OUT_R2" ]]; then
+    echo "Debug mode: Trimmed files already exist: $OUT_R1, $OUT_R2. Skipping trimming." | tee -a $TRIM_LOG
     
     # Add entry to summary file
     echo "Trimming,$SAMPLE_NAME,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
@@ -53,55 +57,63 @@ if [[ "$DEBUG_MODE" == "true" && -s "$TRIM1" && -s "$TRIM2" ]]; then
     exit 0
 fi
 
-# activate conda env
-source ~/.bashrc
-conda activate cellSquito
+# Run fastp
+echo "Running fastp for $SAMPLE_NAME..." | tee -a $TRIM_LOG
 
-echo "Processing sample: $SAMPLE_NAME"
-echo "Input R1: $FILE"
-echo "Input R2: $TWO"
-echo "Output R1: $TRIM1"
-echo "Output R2: $TRIM2"
+# Set up fastp output files - in the reports subdirectory
+HTML_REPORT="$REPORTS_DIR/${SAMPLE_NAME}_fastp.html"
+JSON_REPORT="$REPORTS_DIR/${SAMPLE_NAME}_fastp.json"
 
-# run fastp with configurable parameters
-cmd="fastp -i ${FILE} -I ${TWO} \
-               -o ${TRIM1} -O ${TRIM2} \
-               -h ${HTML_REPORT} -j ${JSON_REPORT} \
-               -w $((SLURM_CPUS_PER_TASK-1)) --dedup"
-echo "Executing command: $cmd"
-time eval $cmd
+# Run fastp with appropriate parameters
+fastp \
+    -i "$R1" \
+    -I "$R2" \
+    -o "$OUT_R1" \
+    -O "$OUT_R2" \
+    --html "$HTML_REPORT" \
+    --json "$JSON_REPORT" \
+    --detect_adapter_for_pe \
+    --cut_front \
+    --cut_tail \
+    --cut_window_size=4 \
+    --cut_mean_quality=20 \
+    --qualified_quality_phred=20 \
+    --unqualified_percent_limit=40 \
+    --n_base_limit=5 \
+    --length_required=50 \
+    --thread=4 \
+    --compression=6 \
+    2>> $TRIM_LOG
 
-# Improved error handling
-if [[ $? -ne 0 ]]; then
-    echo "Error: fastp failed for sample $SAMPLE_NAME" >&2
+# Check if fastp completed successfully
+if [[ $? -eq 0 && -s "$OUT_R1" && -s "$OUT_R2" ]]; then
+    echo "Trimming completed successfully for $SAMPLE_NAME" | tee -a $TRIM_LOG
+    
+    # Get read counts
+    raw_r1_reads=$(zcat -f "$R1" | wc -l | awk '{print $1/4}')
+    raw_r2_reads=$(zcat -f "$R2" | wc -l | awk '{print $1/4}')
+    trimmed_r1_reads=$(zcat -f "$OUT_R1" | wc -l | awk '{print $1/4}')
+    trimmed_r2_reads=$(zcat -f "$OUT_R2" | wc -l | awk '{print $1/4}')
+    
+    # Calculate retention rate
+    retention_rate=$(awk "BEGIN {printf \"%.2f\", ($trimmed_r1_reads / $raw_r1_reads) * 100}")
+    
+    echo "Raw R1 reads: $raw_r1_reads" | tee -a $TRIM_LOG
+    echo "Raw R2 reads: $raw_r2_reads" | tee -a $TRIM_LOG
+    echo "Trimmed R1 reads: $trimmed_r1_reads" | tee -a $TRIM_LOG
+    echo "Trimmed R2 reads: $trimmed_r2_reads" | tee -a $TRIM_LOG
+    echo "Retention rate: ${retention_rate}%" | tee -a $TRIM_LOG
+    
+    # Add to summary file
+    echo "Trimming,$SAMPLE_NAME,Reads Before,$raw_r1_reads" >> "$SUMMARY_FILE"
+    echo "Trimming,$SAMPLE_NAME,Reads After,$trimmed_r1_reads" >> "$SUMMARY_FILE"
+    echo "Trimming,$SAMPLE_NAME,Retention Rate,$retention_rate%" >> "$SUMMARY_FILE"
+    echo "Trimming,$SAMPLE_NAME,Status,Completed" >> "$SUMMARY_FILE"
+else
+    echo "Error: Trimming failed for $SAMPLE_NAME" | tee -a $TRIM_LOG
+    
+    # Add failure to summary file
     echo "Trimming,$SAMPLE_NAME,Status,Failed" >> "$SUMMARY_FILE"
+    
     exit 1
-fi
-
-# Check if output files were created
-for f in "$TRIM1" "$TRIM2" "$HTML_REPORT" "$JSON_REPORT"; do
-    if [[ ! -s "$f" ]]; then
-        echo "Error: Output file $f is missing or empty!" >&2
-        echo "Trimming,$SAMPLE_NAME,Status,Failed (missing output)" >> "$SUMMARY_FILE"
-        exit 1
-    fi
-done
-
-echo "Trimming completed for sample $SAMPLE_NAME"
-
-# Add statistics to summary file
-reads_before=$(zcat -f "$FILE" | wc -l | awk '{print $1/4}')
-reads_after=$(zcat -f "$TRIM1" | wc -l | awk '{print $1/4}')
-
-echo "Trimming,$SAMPLE_NAME,Reads Before,$reads_before" >> "$SUMMARY_FILE"
-echo "Trimming,$SAMPLE_NAME,Reads After,$reads_after" >> "$SUMMARY_FILE"
-echo "Trimming,$SAMPLE_NAME,Status,Completed" >> "$SUMMARY_FILE"
-
-# Add logging information
-echo "Sample: $SAMPLE_NAME" >> "$LOG_DIR/trim_summary.txt"
-echo "Reads before: $reads_before" >> "$LOG_DIR/trim_summary.txt"
-echo "Reads after: $reads_after" >> "$LOG_DIR/trim_summary.txt" 
-echo "-------------------" >> "$LOG_DIR/trim_summary.txt"
-
-echo "HTML report: $HTML_REPORT"
-echo "JSON report: $JSON_REPORT"
+fi 
