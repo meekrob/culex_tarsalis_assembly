@@ -244,3 +244,81 @@ elif [[ -s "$OUT_DIR/rnaquast_plots.pdf" ]]; then
 fi
 
 echo "Visualization results saved to $OUT_DIR"
+
+# Add HTML summary
+cat > "$OUT_DIR/assembly_summary.html" << EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assembly Summary</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Assembly Summary</h1>
+        
+        <div class="section">
+            <h2>BUSCO Assessment</h2>
+EOF
+
+# Extract BUSCO results
+if [[ -f "$BUSCO_DIR/run_${busco_lineage}/busco_figure.png" ]]; then
+    cp "$BUSCO_DIR/run_${busco_lineage}/busco_figure.png" "$OUT_DIR/busco_figure.png"
+    echo '<img src="busco_figure.png" alt="BUSCO Results">' >> "$OUT_DIR/assembly_summary.html"
+else
+    echo "<p>BUSCO results not found.</p>" >> "$OUT_DIR/assembly_summary.html"
+fi
+
+# Add rnaQuast section
+cat >> "$OUT_DIR/assembly_summary.html" << EOF
+        </div>
+        
+        <div class="section">
+            <h2>rnaQuast Assessment</h2>
+EOF
+
+# Extract rnaQuast results
+if [[ -f "$RNAQUAST_DIR/basic_metrics.tsv" ]]; then
+    num_transcripts=$(grep "Transcripts" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
+    longest_transcript=$(grep "Longest transcript" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
+    total_length=$(grep "Total length" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
+    
+    cat >> "$OUT_DIR/assembly_summary.html" << EOF
+            <table>
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td class="metric">Number of transcripts</td><td class="value">$num_transcripts</td></tr>
+                <tr><td class="metric">Longest transcript</td><td class="value">$longest_transcript</td></tr>
+                <tr><td class="metric">Total length</td><td class="value">$total_length</td></tr>
+            </table>
+EOF
+
+    # Copy rnaQuast plots if they exist
+    if [[ -f "$RNAQUAST_DIR/report.pdf" ]]; then
+        cp "$RNAQUAST_DIR/report.pdf" "$OUT_DIR/rnaquast_report.pdf"
+        echo '<p><a href="rnaquast_report.pdf" target="_blank">View detailed rnaQuast report (PDF)</a></p>' >> "$OUT_DIR/assembly_summary.html"
+    fi
+else
+    echo "<p>rnaQuast results not found.</p>" >> "$OUT_DIR/assembly_summary.html"
+fi
+
+# Close HTML
+cat >> "$OUT_DIR/assembly_summary.html" << EOF
+        </div>
+    </div>
+</body>
+</html>
+EOF
+
+# Check if visualization completed successfully
+if [[ $? -eq 0 && -f "$OUT_DIR/assembly_summary.html" ]]; then
+    end_time=$(date +%s)
+    runtime=$((end_time - start_time))
+    
+    echo "Visualization completed successfully in $runtime seconds" | tee -a $VIZ_LOG
+    echo "Output HTML: $OUT_DIR/assembly_summary.html" | tee -a $VIZ_LOG
+else
+    echo "Error: Visualization failed!" | tee -a $VIZ_LOG
+    exit 1
+fi

@@ -5,7 +5,7 @@
 fastp_partition="short-cpu"
 fastp_time="01:00:00"
 fastp_nodes=1
-fastp_cpu_cores_per_task=17
+fastp_cpu_cores_per_task=8
 fastp_mem="8G"
 # fastp tool parameters
 fastp_threads=$((SLURM_CPUS_PER_TASK-1))
@@ -15,14 +15,14 @@ fastp_opts="--dedup"
 cat_partition="short-cpu"
 cat_time="01:00:00"
 cat_nodes=1
-cat_cpu_cores_per_task=2
+cat_cpu_cores_per_task=4
 cat_mem="16G"
 
 # rnaSpades job parameters
 rnaSpades_partition="week-long-highmem"
 rnaSpades_time="7-00:00:00"
-rnaSpades_nodes=2
-rnaSpades_cpu_cores_per_task=32
+rnaSpades_nodes=1
+rnaSpades_cpu_cores_per_task=64
 rnaSpades_mem="250G"  # Might need more 
 # rnaSpades tool parameters
 rnaSpades_threads=$SLURM_CPUS_PER_TASK
@@ -30,7 +30,7 @@ rnaSpades_opts=""
 
 # busco job parameters
 busco_partition="short-cpu"
-busco_time="01:00:00"
+busco_time="04:00:00"
 busco_nodes=1
 busco_cpu_cores_per_task=24
 busco_mem="32G"
@@ -40,7 +40,7 @@ busco_mode="transcriptome"
 
 # rnaQuast job parameters
 rnaQuast_partition="short-cpu"
-rnaQuast_time="01:00:00"
+rnaQuast_time="04:00:00"
 rnaQuast_nodes=1
 rnaQuast_cpu_cores_per_task=24
 rnaQuast_mem="32G"
