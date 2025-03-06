@@ -401,11 +401,11 @@ else
     if [[ "$valid_dependencies" == "true" ]]; then
         echo "Submitting merge job with dependency: $trim_dependency"
         merge_job_id=$(sbatch --parsable \
-                      --partition="${merge_partition}" \
-                      --time="${merge_time}" \
-                      --nodes=${merge_nodes} \
-                      --cpus-per-task=${merge_cpu_cores_per_task} \
-                      --mem="${merge_mem}" \
+                      --partition="short-cpu" \
+                      --time="01:00:00" \
+                      --nodes=1 \
+                      --cpus-per-task=2 \
+                      --mem="16G" \
                       --dependency=$trim_dependency \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
@@ -414,11 +414,11 @@ else
         # If all trimming jobs were skipped in debug mode, submit without dependencies
         echo "All trimming jobs were skipped in debug mode. Submitting merge job without dependencies."
         merge_job_id=$(sbatch --parsable \
-                      --partition="${merge_partition}" \
-                      --time="${merge_time}" \
-                      --nodes=${merge_nodes} \
-                      --cpus-per-task=${merge_cpu_cores_per_task} \
-                      --mem="${merge_mem}" \
+                      --partition="short-cpu" \
+                      --time="01:00:00" \
+                      --nodes=1 \
+                      --cpus-per-task=2 \
+                      --mem="16G" \
                       --output="${merge_logs}/merge_%j.out" \
                       --error="${merge_logs}/merge_%j.err" \
                       bin/02_merge.sh "$r1_trimmed_list" "$r2_trimmed_list" "$merged_r1" "$merged_r2" "$merge_logs" "$SUMMARY_FILE" "$debug_mode")
