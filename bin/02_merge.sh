@@ -4,7 +4,7 @@
 #SBATCH --partition=day-long-cpu
 #SBATCH --time=04:00:00          # Increased time limit
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=16       # More CPUs for parallel processing
+#SBATCH --cpus-per-task=32       # Increased CPUs for parallel processing
 #SBATCH --mem=64G                # More memory for efficient buffering
 #SBATCH --job-name=cat_merge
 # Log files will be specified when submitting the job
@@ -17,7 +17,6 @@ OUT_R2=$4   # Output merged R2 file
 LOG_DIR=${5:-"logs/02_merge"}  # Directory for logs
 DEBUG_MODE=${6:-false}  # Debug mode flag
 SUMMARY_FILE=${7:-"logs/pipeline_summary.csv"}  # Summary file path
-CHUNK_SIZE=${8:-5}      # Number of files to process in each chunk
 
 # Create output directory if it doesn't exist
 mkdir -p $(dirname $OUT_R1)
@@ -118,112 +117,92 @@ fi
 
 echo "All input files verified successfully" | tee -a $MERGE_LOG
 
-# Create temporary directory for processing
-TMP_DIR=$(mktemp -d -p "${TMPDIR:-/tmp}" merge_XXXXXXXX)
-trap 'rm -rf "$TMP_DIR"' EXIT
-
 # Get start time
 start_time=$(date +%s)
 
-# Function to merge files in chunks with progress tracking
-merge_files_in_chunks() {
+# Function to stream-merge files directly to compressed output
+stream_merge_files() {
     local file_list=$1
     local output_file=$2
     local file_type=$3
-    local tmp_output="$TMP_DIR/${file_type}_merged.fastq"
     local total_files=$(wc -l < $file_list)
-    local chunk_start=1
     local files_processed=0
     
-    # Remove output file if it exists
-    rm -f "$output_file"
+    echo "Starting direct stream merge for $file_type to $output_file..." | tee -a $MERGE_LOG
     
-    # Process in chunks
-    while [[ $files_processed -lt $total_files ]]; do
-        # Calculate how many files to process in this chunk (min of CHUNK_SIZE or remaining files)
-        local remaining=$((total_files - files_processed))
-        local chunk_size=$((remaining < CHUNK_SIZE ? remaining : CHUNK_SIZE))
-        local chunk_end=$((files_processed + chunk_size))
-        
-        echo "  Processing $file_type chunk: files $((files_processed+1))-$chunk_end of $total_files" | tee -a $MERGE_LOG
-        
-        # Create temporary file with file paths for this chunk
-        local chunk_list="$TMP_DIR/${file_type}_chunk_${files_processed}.txt"
-        sed -n "$((files_processed+1)),$chunk_end p" $file_list > $chunk_list
-        
-        # Create temporary output for this chunk
-        local chunk_output="$TMP_DIR/${file_type}_chunk_${files_processed}.fastq"
-        
-        # Merge this chunk of files
-        if ! (cat $chunk_list | xargs $DECOMPRESS_CMD > $chunk_output); then
-            echo "  Error merging chunk $((files_processed+1))-$chunk_end for $file_type!" | tee -a $MERGE_LOG
-            return 1
-        fi
-        
-        # Append to main output or set as main output if first chunk
-        if [[ $files_processed -eq 0 ]]; then
-            mv $chunk_output $tmp_output
-        else
-            cat $chunk_output >> $tmp_output
-            rm $chunk_output
-        fi
-        
-        # Clean up chunk file list
-        rm $chunk_list
-        
-        # Update processed count
-        files_processed=$chunk_end
-        
-        # Calculate and display progress
-        local progress=$((files_processed * 100 / total_files))
-        echo "  Progress: $progress% complete for $file_type" | tee -a $MERGE_LOG
-    done
+    # Create a fifo pipe for streaming
+    local pipe=$(mktemp -u)
+    mkfifo $pipe
     
-    # Compress final output with maximum parallelism
-    echo "  Compressing final $file_type output..." | tee -a $MERGE_LOG
-    
+    # Start compression in background using all CPU cores
     if [[ "$COMPRESS_CMD" == "pigz" ]]; then
-        # Use pigz with all available cores
-        cat $tmp_output | $COMPRESS_CMD -p $SLURM_CPUS_PER_TASK > $output_file
+        $COMPRESS_CMD -p $SLURM_CPUS_PER_TASK < $pipe > $output_file &
     else
-        # Use standard gzip
-        cat $tmp_output | $COMPRESS_CMD > $output_file
+        $COMPRESS_CMD < $pipe > $output_file &
     fi
+    compress_pid=$!
+    
+    # Stream each file through the pipe with progress reporting
+    while IFS= read -r file; do
+        files_processed=$((files_processed + 1))
+        
+        # Calculate progress percentage
+        local progress=$((files_processed * 100 / total_files))
+        echo "  Processing $file_type file $files_processed/$total_files ($progress%): $(basename "$file")" | tee -a $MERGE_LOG
+        
+        # Stream this file through the pipe
+        $DECOMPRESS_CMD "$file" >> $pipe
+    done < "$file_list"
+    
+    # Close the pipe to finish compression
+    exec {pipe}>&-
+    
+    # Wait for compression to complete
+    wait $compress_pid
+    local status=$?
+    
+    # Clean up
+    rm -f $pipe
     
     # Check if compression was successful
-    if [[ $? -eq 0 && -s $output_file ]]; then
+    if [[ $status -eq 0 && -s "$output_file" ]]; then
         echo "  Successfully created $output_file" | tee -a $MERGE_LOG
-        rm $tmp_output
         return 0
     else
-        echo "  Error compressing final $file_type output!" | tee -a $MERGE_LOG
+        echo "  Error in stream merge for $file_type!" | tee -a $MERGE_LOG
         return 1
     fi
 }
 
-# Process R1 and R2 files in parallel
+# Process R1 and R2 files in parallel with different CPU allocations
+# Use more cores for compression (2/3) and fewer for decompression (1/3)
+COMPRESS_CORES=$((SLURM_CPUS_PER_TASK * 2 / 3))
+DECOMPRESS_CORES=$((SLURM_CPUS_PER_TASK / 3))
+if [[ $COMPRESS_CORES -lt 1 ]]; then COMPRESS_CORES=1; fi
+if [[ $DECOMPRESS_CORES -lt 1 ]]; then DECOMPRESS_CORES=1; fi
+
 echo "Merging R1 files from list: $R1_LIST" | tee -a $MERGE_LOG
 echo "Merging R2 files from list: $R2_LIST" | tee -a $MERGE_LOG
 echo "Output R1: $OUT_R1" | tee -a $MERGE_LOG
 echo "Output R2: $OUT_R2" | tee -a $MERGE_LOG
+echo "Using $COMPRESS_CORES cores for compression and $DECOMPRESS_CORES cores for decompression" | tee -a $MERGE_LOG
 
-# Split available CPUs between the two processes
-HALF_CPUS=$((SLURM_CPUS_PER_TASK / 2))
-if [[ $HALF_CPUS -lt 1 ]]; then HALF_CPUS=1; fi
-
-# Launch R1 and R2 merging in parallel with controlled CPU usage
+# Launch R1 merge
 {
-    export OMP_NUM_THREADS=$HALF_CPUS
-    echo "Starting R1 merge with $HALF_CPUS threads..." | tee -a $MERGE_LOG
-    merge_files_in_chunks "$R1_LIST" "$OUT_R1" "R1"
+    export OMP_NUM_THREADS=$DECOMPRESS_CORES
+    echo "Starting R1 merge..." | tee -a $MERGE_LOG
+    stream_merge_files "$R1_LIST" "$OUT_R1" "R1"
     r1_status=$?
 } &
 pid1=$!
 
+# Launch R2 merge after a small delay to avoid resource contention
+sleep 2
+
 {
-    export OMP_NUM_THREADS=$HALF_CPUS
-    echo "Starting R2 merge with $HALF_CPUS threads..." | tee -a $MERGE_LOG
-    merge_files_in_chunks "$R2_LIST" "$OUT_R2" "R2"
+    export OMP_NUM_THREADS=$DECOMPRESS_CORES
+    echo "Starting R2 merge..." | tee -a $MERGE_LOG
+    stream_merge_files "$R2_LIST" "$OUT_R2" "R2"
     r2_status=$?
 } &
 pid2=$!
@@ -245,21 +224,28 @@ if [[ $r1_status -eq 0 && $r2_status -eq 0 && -s "$OUT_R1" && -s "$OUT_R2" ]]; t
     echo "Merged R1 file size: $merged_r1_size" | tee -a $MERGE_LOG
     echo "Merged R2 file size: $merged_r2_size" | tee -a $MERGE_LOG
     
-    # Count reads in merged files
-    echo "Counting reads in merged files (this may take a moment)..." | tee -a $MERGE_LOG
-    merged_r1_reads=$($DECOMPRESS_CMD "$OUT_R1" | awk 'NR%4==1' | wc -l)
-    merged_r2_reads=$($DECOMPRESS_CMD "$OUT_R2" | awk 'NR%4==1' | wc -l)
+    # Count reads in merged files (sample only first million lines for speed)
+    echo "Sampling reads in merged files..." | tee -a $MERGE_LOG
+    merged_r1_sample=$($DECOMPRESS_CMD "$OUT_R1" | head -n 1000000 | awk 'NR%4==1' | wc -l)
+    merged_r2_sample=$($DECOMPRESS_CMD "$OUT_R2" | head -n 1000000 | awk 'NR%4==1' | wc -l)
     
-    echo "Merged R1 reads: $merged_r1_reads" | tee -a $MERGE_LOG
-    echo "Merged R2 reads: $merged_r2_reads" | tee -a $MERGE_LOG
+    # Estimate total reads based on file sizes and sample
+    sample_size=1000000
+    r1_bytes=$(stat -c%s "$OUT_R1")
+    r2_bytes=$(stat -c%s "$OUT_R2")
+    r1_est_reads=$(echo "scale=0; ($merged_r1_sample * $r1_bytes) / ($sample_size * 4)" | bc)
+    r2_est_reads=$(echo "scale=0; ($merged_r2_sample * $r2_bytes) / ($sample_size * 4)" | bc)
+    
+    echo "Estimated R1 reads: ~$r1_est_reads" | tee -a $MERGE_LOG
+    echo "Estimated R2 reads: ~$r2_est_reads" | tee -a $MERGE_LOG
     
     # Add to summary file
     echo "Merge,,Status,Completed" >> "$SUMMARY_FILE"
     echo "Merge,,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
-    echo "Merge,,R1 Reads,$merged_r1_reads" >> "$SUMMARY_FILE"
-    echo "Merge,,R2 Reads,$merged_r2_reads" >> "$SUMMARY_FILE"
     echo "Merge,,R1 Size,$merged_r1_size" >> "$SUMMARY_FILE"
     echo "Merge,,R2 Size,$merged_r2_size" >> "$SUMMARY_FILE"
+    echo "Merge,,Estimated R1 Reads,$r1_est_reads" >> "$SUMMARY_FILE"
+    echo "Merge,,Estimated R2 Reads,$r2_est_reads" >> "$SUMMARY_FILE"
     
     exit 0
 else
