@@ -193,6 +193,7 @@ dependencies:
   - perl-try-tiny=0.31=pl5321ha770c72_0
   - perl-types-serialiser=1.01=pl5321hdfd78af_0
   - perl-yaml=1.30=pl5321hdfd78af_0
+  - pigz=2.8=hadc24fc_1
   - pillow=11.1.0=py39h15c0740_0
   - pip=25.0.1=pyh8b19718_0
   - pixman=0.44.2=h29eaf8c_0
