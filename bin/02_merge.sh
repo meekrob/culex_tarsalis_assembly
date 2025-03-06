@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # slurm parameters, see config/parameters.txt
-#SBATCH --partition=short-cpu
+#SBATCH --partition=day-long-cpu
 #SBATCH --time=04:00:00          # Increased time limit
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=16       # More CPUs for parallel processing
