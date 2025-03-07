@@ -2,9 +2,9 @@
 
 # slurm parameters
 #SBATCH --partition=day-long-highmem
-#SBATCH --time=02:00:00
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=64
 #SBATCH --mem=128G
 #SBATCH --job-name=check_pairs
 # Log files will be specified when submitting the job
