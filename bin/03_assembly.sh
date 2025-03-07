@@ -10,8 +10,8 @@
 # Log files will be specified when submitting the job
 
 # input file variables passed in as arguments from main.sh
-MERGED_R1=$1
-MERGED_R2=$2
+MERGED_R1=$1  # Now this will be the fixed_R1.fastq.gz file
+MERGED_R2=$2  # Now this will be the fixed_R2.fastq.gz file
 OUTPUT_DIR=$3
 LOG_DIR=${4:-"logs/03_assembly"}
 DEBUG_MODE=${5:-false}

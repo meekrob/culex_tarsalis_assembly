@@ -158,6 +158,10 @@ r2_trimmed_list="$temp_dir/r2_trimmed.txt"
 > "$r1_trimmed_list"
 > "$r2_trimmed_list"
 
+# Create a file to track successful trimming jobs
+successful_trim_jobs="$temp_dir/successful_trim_jobs.txt"
+> "$successful_trim_jobs"
+
 # Array to store trimming job IDs
 trim_job_ids=()
 
@@ -170,10 +174,6 @@ for ((i=0; i<${#samples[@]}; i++)); do
     trim_r1="${trimmed_dir}/${sample}_R1_trimmed.fastq.gz"
     trim_r2="${trimmed_dir}/${sample}_R2_trimmed.fastq.gz"
     
-    # Add to trimmed files list for merging
-    echo "$trim_r1" >> "$r1_trimmed_list"
-    echo "$trim_r2" >> "$r2_trimmed_list"
-    
     # Submit trimming job
     trim_cmd="sbatch --parsable --job-name=trim_${sample} --output=${trim_logs}/trim_${sample}_%j.out --error=${trim_logs}/trim_${sample}_%j.err"
     trim_job_id=$(eval $trim_cmd bin/01_trimming.sh "$r1" "$r2" "$trim_r1" "$trim_r2" "$sample" "$trim_logs" "$summary_file" "$debug_mode")
@@ -181,6 +181,22 @@ for ((i=0; i<${#samples[@]}; i++)); do
     if [[ -n "$trim_job_id" ]]; then
         trim_job_ids+=($trim_job_id)
         echo "Submitted trimming job for $sample: $trim_job_id"
+        
+        # Add a job to check if trimming was successful and add to the list if it was
+        check_cmd="sbatch --parsable --job-name=check_${sample} --output=${trim_logs}/check_${sample}_%j.out --error=${trim_logs}/check_${sample}_%j.err --dependency=afterany:${trim_job_id}"
+        check_job_id=$(eval $check_cmd << EOF
+#!/bin/bash
+if grep -q "Trimming,${sample},Status,Completed" "$summary_file"; then
+    echo "${trim_r1}" >> "$r1_trimmed_list"
+    echo "${trim_r2}" >> "$r2_trimmed_list"
+    echo "${sample}" >> "$successful_trim_jobs"
+    echo "Sample ${sample} successfully trimmed, added to merge list"
+else
+    echo "Warning: Trimming failed or was skipped for ${sample}, excluding from merge"
+fi
+EOF
+)
+        echo "Submitted check job for $sample: $check_job_id"
     else
         echo "Error: Failed to submit trimming job for $sample"
         exit 1
@@ -191,11 +207,8 @@ done
 merged_r1="${merged_dir}/merged_R1.fastq.gz"
 merged_r2="${merged_dir}/merged_R2.fastq.gz"
 
-# Create dependency for merge job
-merge_dependency=""
-if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-    merge_dependency="--dependency=afterany:"$(IFS=:; echo "${trim_job_ids[*]}")
-fi
+# Create dependency for merge job - wait for all check jobs to complete
+merge_dependency="--dependency=afterany:"$(IFS=:; echo "${trim_job_ids[*]}")
 
 # Submit R1 merge job
 merge_r1_cmd="sbatch --parsable --job-name=merge_r1 --output=${merge_logs}/merge_r1_%j.out --error=${merge_logs}/merge_r1_%j.err $merge_dependency"
@@ -219,15 +232,36 @@ else
     exit 1
 fi
 
-# Make assembly job dependent on both merge jobs
-assembly_dependency="--dependency=afterok:${merge_r1_job_id}:${merge_r2_job_id}"
+# Step 3: Add pair checking step
+echo "Submitting pair checking job..."
+
+# Set output files for fixed paired reads
+fixed_r1="${merged_dir}/fixed_R1.fastq.gz"
+fixed_r2="${merged_dir}/fixed_R2.fastq.gz"
+
+# Make pair checking job dependent on both merge jobs
+check_pairs_dependency="--dependency=afterok:${merge_r1_job_id}:${merge_r2_job_id}"
+
+# Submit pair checking job
+check_pairs_cmd="sbatch --parsable --job-name=check_pairs --output=${merge_logs}/check_pairs_%j.out --error=${merge_logs}/check_pairs_%j.err $check_pairs_dependency"
+check_pairs_job_id=$(eval $check_pairs_cmd bin/02.5_check_pairs.sh "$merged_r1" "$merged_r2" "$fixed_r1" "$fixed_r2" "$merge_logs" "$summary_file" "$debug_mode")
+
+if [[ -n "$check_pairs_job_id" ]]; then
+    echo "Submitted pair checking job: $check_pairs_job_id"
+else
+    echo "Error: Failed to submit pair checking job"
+    exit 1
+fi
+
+# Make assembly job dependent on pair checking job
+assembly_dependency="--dependency=afterok:${check_pairs_job_id}"
 
 # Step 4: Submit assembly job
 echo "Submitting assembly job..."
 
 # Submit assembly job
 assembly_cmd="sbatch --parsable --job-name=assembly --output=${assembly_logs}/assembly_%j.out --error=${assembly_logs}/assembly_%j.err $assembly_dependency"
-assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$merged_r1" "$merged_r2" "$assembly_dir" "$assembly_logs" "$debug_mode" "$summary_file")
+assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$fixed_r1" "$fixed_r2" "$assembly_dir" "$assembly_logs" "$debug_mode" "$summary_file")
 
 if [[ -n "$assembly_job_id" ]]; then
     echo "Submitted assembly job: $assembly_job_id"
