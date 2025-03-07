@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # slurm parameters
-#SBATCH --partition=short-cpu
+#SBATCH --partition=day-long-highmem
 #SBATCH --time=02:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128G
 #SBATCH --job-name=check_pairs
 # Log files will be specified when submitting the job
 
