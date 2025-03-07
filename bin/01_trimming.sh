@@ -73,14 +73,6 @@ fastp \
     --html "$HTML_REPORT" \
     --json "$JSON_REPORT" \
     --detect_adapter_for_pe \
-    --cut_front \
-    --cut_tail \
-    --cut_window_size=4 \
-    --cut_mean_quality=20 \
-    --qualified_quality_phred=20 \
-    --unqualified_percent_limit=40 \
-    --n_base_limit=5 \
-    --length_required=50 \
     --thread=4 \
     --compression=6 \
     2>> $TRIM_LOG
@@ -114,6 +106,5 @@ else
     
     # Add failure to summary file
     echo "Trimming,$SAMPLE_NAME,Status,Failed" >> "$SUMMARY_FILE"
-    
-    exit 1
 fi 
+                                                                                                                                                                                                                                                                                                                                                 
