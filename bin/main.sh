@@ -183,8 +183,8 @@ for ((i=0; i<${#samples[@]}; i++)); do
         echo "Submitted trimming job for $sample: $trim_job_id"
         
         # Add a job to check if trimming was successful and add to the list if it was
-        check_cmd="sbatch --parsable --job-name=check_${sample} --output=${trim_logs}/check_${sample}_%j.out --error=${trim_logs}/check_${sample}_%j.err --dependency=afterany:${trim_job_id}"
-        check_job_id=$(eval $check_cmd << EOF
+        filter_cmd="sbatch --parsable --job-name=filter_${sample} --output=${trim_logs}/filter_${sample}_%j.out --error=${trim_logs}/filter_${sample}_%j.err --dependency=afterany:${trim_job_id}"
+        filter_job_id=$(eval $filter_cmd << EOF
 #!/bin/bash
 if grep -q "Trimming,${sample},Status,Completed" "$summary_file"; then
     echo "${trim_r1}" >> "$r1_trimmed_list"
@@ -196,7 +196,7 @@ else
 fi
 EOF
 )
-        echo "Submitted check job for $sample: $check_job_id"
+        echo "Submitted filter job for $sample: $filter_job_id"
     else
         echo "Error: Failed to submit trimming job for $sample"
         exit 1
