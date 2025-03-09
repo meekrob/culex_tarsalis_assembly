@@ -66,6 +66,7 @@ repair.sh \
     overwrite=t \
     tossbrokenreads=t \
     repair=t \
+    showspeed=t \
     threads=$SLURM_CPUS_PER_TASK \
     2>> $CHECK_LOG
 

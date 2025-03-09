@@ -253,15 +253,44 @@ else
     exit 1
 fi
 
-# Make assembly job dependent on pair checking job
-assembly_dependency="--dependency=afterok:${check_pairs_job_id}"
+# Step 3.5: Add normalization step
+echo "Submitting read normalization job..."
+
+# Create normalization directory
+norm_dir="${merged_dir}/normalized"
+mkdir -p "$norm_dir"
+
+# Set output files for normalized reads
+norm_r1="${norm_dir}/normalized_R1.fastq.gz"
+norm_r2="${norm_dir}/normalized_R2.fastq.gz"
+
+# Make normalization job dependent on pair checking job
+norm_dependency="--dependency=afterok:${check_pairs_job_id}"
+
+# Create normalization log directory
+norm_logs="${logs_base}/02.75_normalization"
+mkdir -p "$norm_logs"
+
+# Submit normalization job
+norm_cmd="sbatch --parsable --job-name=normalize --output=${norm_logs}/normalize_%j.out --error=${norm_logs}/normalize_%j.err $norm_dependency"
+norm_job_id=$(eval $norm_cmd bin/02.75_read_normalization.sh "$fixed_r1" "$fixed_r2" "$norm_r1" "$norm_r2" "$norm_logs" "$summary_file" "$debug_mode")
+
+if [[ -n "$norm_job_id" ]]; then
+    echo "Submitted normalization job: $norm_job_id"
+else
+    echo "Error: Failed to submit normalization job"
+    exit 1
+fi
+
+# Make assembly job dependent on normalization job instead of pair checking job
+assembly_dependency="--dependency=afterok:${norm_job_id}"
 
 # Step 4: Submit assembly job
 echo "Submitting assembly job..."
 
 # Submit assembly job
 assembly_cmd="sbatch --parsable --job-name=assembly --output=${assembly_logs}/assembly_%j.out --error=${assembly_logs}/assembly_%j.err $assembly_dependency"
-assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$fixed_r1" "$fixed_r2" "$assembly_dir" "$assembly_logs" "$debug_mode" "$summary_file")
+assembly_job_id=$(eval $assembly_cmd bin/03_assembly.sh "$norm_r1" "$norm_r2" "$assembly_dir" "$assembly_logs" "$debug_mode" "$summary_file")
 
 if [[ -n "$assembly_job_id" ]]; then
     echo "Submitted assembly job: $assembly_job_id"
@@ -312,6 +341,8 @@ fi
 echo "All jobs submitted. Pipeline will run with the following job IDs:"
 echo "  Trimming: ${trim_job_ids[*]}"
 echo "  Merging: $merge_r1_job_id, $merge_r2_job_id"
+echo "  Pair checking: $check_pairs_job_id"
+echo "  Normalization: $norm_job_id"
 echo "  Assembly: $assembly_job_id"
 echo "  BUSCO: $busco_job_id"
 echo "  rnaQuast: $rnaquast_job_id"
