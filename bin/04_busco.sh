@@ -26,6 +26,15 @@ echo "Starting BUSCO job at $(date)" > $BUSCO_LOG
 echo "Transcriptome: $TRANSCRIPTOME" >> $BUSCO_LOG
 echo "Output directory: $OUTPUT_DIR" >> $BUSCO_LOG
 
+# Check if input is gzipped
+UNZIPPED_TRANSCRIPTOME=$TRANSCRIPTOME
+if [[ "$TRANSCRIPTOME" == *.gz ]]; then
+    echo "Input transcriptome is gzipped. Decompressing before BUSCO analysis..." | tee -a $BUSCO_LOG
+    UNZIPPED_TRANSCRIPTOME="${TRANSCRIPTOME%.gz}"
+    gunzip -c "$TRANSCRIPTOME" > "$UNZIPPED_TRANSCRIPTOME"
+    echo "Decompressed to: $UNZIPPED_TRANSCRIPTOME" | tee -a $BUSCO_LOG
+fi
+
 # Debug mode: Check if output files already exist
 if [[ "$DEBUG_MODE" == "true" && -d "$OUTPUT_DIR" && -f "$OUTPUT_DIR/short_summary.txt" ]]; then
     echo "Debug mode: BUSCO output already exists: $OUTPUT_DIR/short_summary.txt. Skipping BUSCO." | tee -a $BUSCO_LOG
@@ -33,13 +42,18 @@ if [[ "$DEBUG_MODE" == "true" && -d "$OUTPUT_DIR" && -f "$OUTPUT_DIR/short_summa
     # Add summary entry
     echo "BUSCO,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
     
+    # Clean up decompressed file if we created one
+    if [[ "$TRANSCRIPTOME" == *.gz && "$UNZIPPED_TRANSCRIPTOME" != "$TRANSCRIPTOME" ]]; then
+        rm -f "$UNZIPPED_TRANSCRIPTOME"
+    fi
+    
     exit 0
 fi
 
 # Check if input file exists
-if [[ ! -s "$TRANSCRIPTOME" ]]; then
+if [[ ! -s "$UNZIPPED_TRANSCRIPTOME" ]]; then
     echo "Error: Input transcriptome file is missing or empty!" | tee -a $BUSCO_LOG
-    echo "TRANSCRIPTOME: $TRANSCRIPTOME" | tee -a $BUSCO_LOG
+    echo "TRANSCRIPTOME: $UNZIPPED_TRANSCRIPTOME" | tee -a $BUSCO_LOG
     
     # Add summary entry
     echo "BUSCO,,Status,Failed (missing input)" >> "$SUMMARY_FILE"
@@ -59,7 +73,7 @@ start_time=$(date +%s)
 
 # Run BUSCO with appropriate parameters
 busco \
-    -i "$TRANSCRIPTOME" \
+    -i "$UNZIPPED_TRANSCRIPTOME" \
     -o "$(basename $OUTPUT_DIR)" \
     -l diptera_odb10 \
     -m transcriptome \
@@ -105,6 +119,12 @@ else
     echo "Error: BUSCO failed!" | tee -a $BUSCO_LOG
     echo "BUSCO,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
+fi
+
+# Clean up decompressed file if we created one
+if [[ "$TRANSCRIPTOME" == *.gz && "$UNZIPPED_TRANSCRIPTOME" != "$TRANSCRIPTOME" ]]; then
+    echo "Cleaning up temporary decompressed file..." | tee -a $BUSCO_LOG
+    rm -f "$UNZIPPED_TRANSCRIPTOME"
 fi
 
 # Move BUSCO output to the specified output directory if needed

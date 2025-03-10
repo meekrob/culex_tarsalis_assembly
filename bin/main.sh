@@ -52,7 +52,6 @@ trimmed_dir="${result_base}/01_trimmed"
 merged_dir="${result_base}/02_merged"
 assembly_dir="${result_base}/03_assembly"
 busco_dir="${result_base}/04_busco"
-rnaquast_dir="${result_base}/04_rnaquast"
 viz_dir="${result_base}/05_visualization"
 
 # Create these directories
@@ -60,7 +59,6 @@ mkdir -p "$trimmed_dir"
 mkdir -p "$merged_dir"
 mkdir -p "$assembly_dir"
 mkdir -p "$busco_dir"
-mkdir -p "$rnaquast_dir"
 mkdir -p "$viz_dir"
 
 # Create specific log directories
@@ -68,7 +66,6 @@ trim_logs="${logs_base}/01_trimming"
 merge_logs="${logs_base}/02_merge"
 assembly_logs="${logs_base}/03_assembly"
 busco_logs="${logs_base}/04_busco"
-rnaquast_logs="${logs_base}/04_rnaquast"
 viz_logs="${logs_base}/05_visualization"
 
 # Create log directories
@@ -76,7 +73,6 @@ mkdir -p "$trim_logs"
 mkdir -p "$merge_logs"
 mkdir -p "$assembly_logs"
 mkdir -p "$busco_logs"
-mkdir -p "$rnaquast_logs"
 mkdir -p "$viz_logs"
 
 # Create summary file
@@ -299,12 +295,12 @@ else
     exit 1
 fi
 
-# Step 5: Submit BUSCO and rnaQuast jobs
-echo "Submitting quality assessment jobs..."
+# Step 5: Submit BUSCO job
+echo "Submitting quality assessment job..."
 
 # Submit BUSCO job
 busco_cmd="sbatch --parsable --job-name=busco --output=${busco_logs}/busco_%j.out --error=${busco_logs}/busco_%j.err --dependency=afterok:${assembly_job_id}"
-busco_job_id=$(eval $busco_cmd bin/04_busco.sh "$assembly_dir/transcripts.fasta" "$busco_dir" "$busco_logs" "$debug_mode")
+busco_job_id=$(eval $busco_cmd bin/04_busco.sh "$assembly_dir/transcripts.fasta" "$busco_dir" "$busco_logs" "$debug_mode" "$summary_file")
 
 if [[ -n "$busco_job_id" ]]; then
     echo "Submitted BUSCO job: $busco_job_id"
@@ -313,23 +309,12 @@ else
     exit 1
 fi
 
-# Submit rnaQuast job
-rnaquast_cmd="sbatch --parsable --job-name=rnaquast --output=${rnaquast_logs}/rnaquast_%j.out --error=${rnaquast_logs}/rnaquast_%j.err --dependency=afterok:${assembly_job_id}"
-rnaquast_job_id=$(eval $rnaquast_cmd bin/04_rnaquast.sh "$assembly_dir/transcripts.fasta" "$rnaquast_dir" "$rnaquast_logs" "$debug_mode")
-
-if [[ -n "$rnaquast_job_id" ]]; then
-    echo "Submitted rnaQuast job: $rnaquast_job_id"
-else
-    echo "Error: Failed to submit rnaQuast job"
-    exit 1
-fi
-
 # Step 6: Submit visualization job
 echo "Submitting visualization job..."
 
 # Submit visualization job
-viz_cmd="sbatch --parsable --job-name=visualize --output=${viz_logs}/viz_%j.out --error=${viz_logs}/viz_%j.err --dependency=afterok:${busco_job_id}:${rnaquast_job_id}"
-viz_job_id=$(eval $viz_cmd bin/05_visualize.sh "$busco_dir" "$rnaquast_dir" "$viz_dir" "" "" "$viz_logs" "$summary_file" "$debug_mode")
+viz_cmd="sbatch --parsable --job-name=visualize --output=${viz_logs}/viz_%j.out --error=${viz_logs}/viz_%j.err --dependency=afterok:${busco_job_id}"
+viz_job_id=$(eval $viz_cmd bin/05_visualize.sh "$busco_dir" "" "$viz_dir" "" "" "$viz_logs" "$summary_file" "$debug_mode")
 
 if [[ -n "$viz_job_id" ]]; then
     echo "Submitted visualization job: $viz_job_id"
@@ -345,7 +330,6 @@ echo "  Pair checking: $check_pairs_job_id"
 echo "  Normalization: $norm_job_id"
 echo "  Assembly: $assembly_job_id"
 echo "  BUSCO: $busco_job_id"
-echo "  rnaQuast: $rnaquast_job_id"
 echo "  Visualization: $viz_job_id"
 
 # Calculate total runtime

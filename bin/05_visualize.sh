@@ -11,10 +11,10 @@
 
 # input file variables passed in as arguments from main_mosquito.sh
 BUSCO_DIR=$1       # BUSCO results directory
-RNAQUAST_DIR=$2    # rnaQuast results directory
+UNUSED_PARAM=$2    # Placeholder for removed rnaQuast parameter
 OUT_DIR=$3         # Output directory for visualizations
 DRAFT_BUSCO_DIR=$4 # BUSCO results for draft transcriptome (optional)
-DRAFT_RNAQUAST_DIR=$5 # rnaQuast results for draft transcriptome (optional)
+UNUSED_PARAM2=$5   # Placeholder for removed rnaQuast parameter
 LOG_DIR=${6:-"logs/05_visualization"}  # Directory for logs
 SUMMARY_FILE=${7:-"logs/pipeline_summary.csv"}  # Summary file path
 DEBUG_MODE=${8:-false}  # Debug mode flag
@@ -23,13 +23,25 @@ DEBUG_MODE=${8:-false}  # Debug mode flag
 mkdir -p $OUT_DIR
 mkdir -p $LOG_DIR
 
+# Create a log file for this visualization job
+VIZ_LOG="$LOG_DIR/visualization_$(date +%Y%m%d_%H%M%S).log"
+echo "Starting visualization job at $(date)" > $VIZ_LOG
+echo "BUSCO directory: $BUSCO_DIR" >> $VIZ_LOG
+echo "Output directory: $OUT_DIR" >> $VIZ_LOG
+if [[ -n "$DRAFT_BUSCO_DIR" && -d "$DRAFT_BUSCO_DIR" ]]; then
+    echo "Draft BUSCO directory: $DRAFT_BUSCO_DIR" >> $VIZ_LOG
+fi
+
+# Get start time for timing
+start_time=$(date +%s)
+
 # Debug mode: Check if output files already exist
-if [[ "$DEBUG_MODE" == "true" && -s "$OUT_DIR/combined_plot.pdf" ]]; then
-    echo "Debug mode: Visualization plot already exists: $OUT_DIR/combined_plot.pdf. Skipping visualization."
+if [[ "$DEBUG_MODE" == "true" && -s "$OUT_DIR/busco_plot.pdf" ]]; then
+    echo "Debug mode: Visualization plot already exists: $OUT_DIR/busco_plot.pdf. Skipping visualization." | tee -a $VIZ_LOG
     
     # Add entry to summary file
     echo "Visualization,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
-    echo "Visualization,,Plots Generated,$OUT_DIR/combined_plot.pdf" >> "$SUMMARY_FILE"
+    echo "Visualization,,Plots Generated,$OUT_DIR/busco_plot.pdf" >> "$SUMMARY_FILE"
     
     exit 0
 fi
@@ -38,22 +50,13 @@ fi
 source ~/.bashrc
 conda activate cellSquito
 
-echo "Starting visualization"
-echo "BUSCO directory: $BUSCO_DIR"
-echo "rnaQuast directory: $RNAQUAST_DIR"
-echo "Output directory: $OUT_DIR"
-if [[ -n "$DRAFT_BUSCO_DIR" && -d "$DRAFT_BUSCO_DIR" ]]; then
-    echo "Draft BUSCO directory: $DRAFT_BUSCO_DIR"
-fi
-if [[ -n "$DRAFT_RNAQUAST_DIR" && -d "$DRAFT_RNAQUAST_DIR" ]]; then
-    echo "Draft rnaQuast directory: $DRAFT_RNAQUAST_DIR"
-fi
+echo "Starting visualization" | tee -a $VIZ_LOG
 
 # Create an R script for visualization
 R_SCRIPT="$OUT_DIR/generate_plots.R"
 
 cat > $R_SCRIPT << 'EOF'
-# R script to generate visualizations from BUSCO and rnaQuast results
+# R script to generate visualizations from BUSCO results
 
 library(ggplot2)
 library(dplyr)
@@ -89,37 +92,14 @@ read_busco <- function(file_path, label) {
   )
 }
 
-# Function to read rnaQuast report file
-read_rnaquast <- function(file_path, label) {
-  if (!file.exists(file_path)) {
-    warning(paste("rnaQuast file not found:", file_path))
-    return(NULL)
-  }
-  
-  lines <- readLines(file_path)
-  
-  # Extract key metrics
-  transcripts <- as.numeric(sub("Transcripts: (\\d+)", "\\1", grep("^Transcripts:", lines, value = TRUE)[1]))
-  total_length <- as.numeric(sub("Total length: (\\d+)", "\\1", grep("^Total length", lines, value = TRUE)[1]))
-  n50 <- as.numeric(sub("Transcript N50: (\\d+)", "\\1", grep("^Transcript N50:", lines, value = TRUE)[1]))
-  
-  data.frame(
-    Metric = c("Transcripts", "Total Length (Mb)", "N50"),
-    Value = c(transcripts, total_length / 1e6, n50),
-    Assembly = label
-  )
-}
-
-# Read BUSCO results
+# Read command line arguments
 args <- commandArgs(trailingOnly = TRUE)
 busco_dir <- args[1]
-rnaquast_dir <- args[2]
-out_dir <- args[3]
-draft_busco_dir <- if (length(args) >= 4 && args[4] != "") args[4] else NULL
-draft_rnaquast_dir <- if (length(args) >= 5 && args[5] != "") args[5] else NULL
+out_dir <- args[2]
+draft_busco_dir <- if (length(args) >= 3 && args[3] != "") args[3] else NULL
 
 # Find BUSCO summary files
-busco_files <- list.files(busco_dir, pattern = "short_summary.*\\.txt$", full.names = TRUE)
+busco_files <- list.files(busco_dir, pattern = "short_summary.*\\.txt$", full.names = TRUE, recursive = TRUE)
 if (length(busco_files) == 0) {
   stop("No BUSCO summary files found in ", busco_dir)
 }
@@ -129,7 +109,7 @@ busco_data <- read_busco(busco_files[1], "Assembly")
 
 # Read draft BUSCO results if available
 if (!is.null(draft_busco_dir)) {
-  draft_busco_files <- list.files(draft_busco_dir, pattern = "short_summary.*\\.txt$", full.names = TRUE)
+  draft_busco_files <- list.files(draft_busco_dir, pattern = "short_summary.*\\.txt$", full.names = TRUE, recursive = TRUE)
   if (length(draft_busco_files) > 0) {
     draft_busco_data <- read_busco(draft_busco_files[1], "Draft")
     if (!is.null(draft_busco_data)) {
@@ -138,112 +118,63 @@ if (!is.null(draft_busco_dir)) {
   }
 }
 
-# Read rnaQuast results
-rnaquast_file <- file.path(rnaquast_dir, "report.txt")
-rnaquast_data <- read_rnaquast(rnaquast_file, "Assembly")
-
-# Read draft rnaQuast results if available
-if (!is.null(draft_rnaquast_dir)) {
-  draft_rnaquast_file <- file.path(draft_rnaquast_dir, "report.txt")
-  draft_rnaquast_data <- read_rnaquast(draft_rnaquast_file, "Draft")
-  if (!is.null(draft_rnaquast_data)) {
-    rnaquast_data <- rbind(rnaquast_data, draft_rnaquast_data)
-  }
-}
-
-# Create BUSCO plot
+# Generate BUSCO plot if data is available
 if (!is.null(busco_data)) {
+  # Create color palette
+  colors <- c("Complete (single)" = "#4DBBD5FF", 
+              "Complete (duplicated)" = "#00A087FF",
+              "Fragmented" = "#E64B35FF", 
+              "Missing" = "#3C5488FF")
+  
+  # Create BUSCO plot
   busco_plot <- ggplot(busco_data, aes(x = Assembly, y = Percentage, fill = Category)) +
-    geom_bar(stat = "identity") +
-    scale_fill_manual(values = c("Complete (single)" = "#44AA99", 
-                                "Complete (duplicated)" = "#88CCEE", 
-                                "Fragmented" = "#DDCC77", 
-                                "Missing" = "#CC6677")) +
-    labs(title = "BUSCO Assessment", y = "Percentage", x = "") +
+    geom_bar(stat = "identity", width = 0.7) +
+    scale_fill_manual(values = colors) +
     theme_minimal() +
-    theme(legend.position = "bottom")
+    labs(title = "BUSCO Assessment Results",
+         y = "Percentage (%)",
+         x = NULL) +
+    theme(legend.position = "right",
+          axis.text.x = element_text(angle = 45, hjust = 1))
   
-  ggsave(file.path(out_dir, "busco_plot.pdf"), busco_plot, width = 8, height = 6)
-}
-
-# Create rnaQuast plots
-if (!is.null(rnaquast_data)) {
-  # Reshape data for plotting
-  rnaquast_long <- rnaquast_data %>%
-    pivot_wider(names_from = Metric, values_from = Value) %>%
-    pivot_longer(cols = c("Transcripts", "Total Length (Mb)", "N50"), 
-                 names_to = "Metric", values_to = "Value")
-  
-  # Create separate plots for each metric
-  rnaquast_plots <- rnaquast_long %>%
-    group_by(Metric) %>%
-    do(plot = ggplot(., aes(x = Assembly, y = Value, fill = Assembly)) +
-         geom_bar(stat = "identity") +
-         labs(title = unique(.$Metric), y = "", x = "") +
-         theme_minimal() +
-         theme(legend.position = "none"))
-  
-  # Arrange plots in a grid
-  pdf(file.path(out_dir, "rnaquast_plots.pdf"), width = 10, height = 8)
-  grid.arrange(grobs = rnaquast_plots$plot, ncol = 2)
+  # Save BUSCO plot
+  pdf(file.path(out_dir, "busco_plot.pdf"), width = 8, height = 6)
+  print(busco_plot)
   dev.off()
-}
-
-# Create combined plot if both datasets are available
-if (!is.null(busco_data) && !is.null(rnaquast_data)) {
-  pdf(file.path(out_dir, "combined_plot.pdf"), width = 12, height = 8)
-  grid.arrange(
-    busco_plot,
-    arrangeGrob(grobs = rnaquast_plots$plot, ncol = 2),
-    ncol = 1,
-    heights = c(1, 1.5)
-  )
-  dev.off()
-}
-
-# Save summary data
-if (!is.null(busco_data)) {
+  
+  # Save summary data
   write.csv(busco_data, file.path(out_dir, "busco_summary.csv"), row.names = FALSE)
+  
+  cat("BUSCO visualization completed successfully!\n")
+} else {
+  cat("Warning: No BUSCO data available for visualization!\n")
 }
-if (!is.null(rnaquast_data)) {
-  write.csv(rnaquast_data, file.path(out_dir, "rnaquast_summary.csv"), row.names = FALSE)
-}
-
-cat("Visualization completed successfully!\n")
 EOF
 
 # Run the R script
-cmd="Rscript $R_SCRIPT $BUSCO_DIR $RNAQUAST_DIR $OUT_DIR $DRAFT_BUSCO_DIR $DRAFT_RNAQUAST_DIR"
-echo "Executing command: $cmd"
-time eval $cmd
+cmd="Rscript $R_SCRIPT $BUSCO_DIR $OUT_DIR $DRAFT_BUSCO_DIR"
+echo "Executing command: $cmd" | tee -a $VIZ_LOG
+time eval $cmd 2>> $VIZ_LOG
 
 # Check if visualization was successful
 if [[ $? -ne 0 ]]; then
-    echo "Error: Visualization failed!" >&2
+    echo "Error: Visualization failed!" | tee -a $VIZ_LOG
     echo "Visualization,,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 
 # Check if output files were created
-if [[ ! -s "$OUT_DIR/combined_plot.pdf" && ! -s "$OUT_DIR/busco_plot.pdf" && ! -s "$OUT_DIR/rnaquast_plots.pdf" ]]; then
-    echo "Error: No visualization plots were generated!" >&2
+if [[ ! -s "$OUT_DIR/busco_plot.pdf" ]]; then
+    echo "Error: No visualization plots were generated!" | tee -a $VIZ_LOG
     echo "Visualization,,Status,Failed (missing output)" >> "$SUMMARY_FILE"
     exit 1
 fi
 
-echo "Visualization completed successfully!"
+echo "Visualization completed successfully!" | tee -a $VIZ_LOG
 
 # Add visualization information to summary file
 echo "Visualization,,Status,Completed" >> "$SUMMARY_FILE"
-if [[ -s "$OUT_DIR/combined_plot.pdf" ]]; then
-    echo "Visualization,,Plots Generated,$OUT_DIR/combined_plot.pdf" >> "$SUMMARY_FILE"
-elif [[ -s "$OUT_DIR/busco_plot.pdf" ]]; then
-    echo "Visualization,,Plots Generated,$OUT_DIR/busco_plot.pdf" >> "$SUMMARY_FILE"
-elif [[ -s "$OUT_DIR/rnaquast_plots.pdf" ]]; then
-    echo "Visualization,,Plots Generated,$OUT_DIR/rnaquast_plots.pdf" >> "$SUMMARY_FILE"
-fi
-
-echo "Visualization results saved to $OUT_DIR"
+echo "Visualization,,Plots Generated,$OUT_DIR/busco_plot.pdf" >> "$SUMMARY_FILE"
 
 # Add HTML summary
 cat > "$OUT_DIR/assembly_summary.html" << EOF
@@ -253,7 +184,67 @@ cat > "$OUT_DIR/assembly_summary.html" << EOF
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assembly Summary</title>
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #2980b9;
+            margin-top: 30px;
+        }
+        .section {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 20px auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .metric {
+            font-weight: bold;
+        }
+        .value {
+            font-family: monospace;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -264,43 +255,29 @@ cat > "$OUT_DIR/assembly_summary.html" << EOF
 EOF
 
 # Extract BUSCO results
-if [[ -f "$BUSCO_DIR/run_${busco_lineage}/busco_figure.png" ]]; then
-    cp "$BUSCO_DIR/run_${busco_lineage}/busco_figure.png" "$OUT_DIR/busco_figure.png"
-    echo '<img src="busco_figure.png" alt="BUSCO Results">' >> "$OUT_DIR/assembly_summary.html"
-else
-    echo "<p>BUSCO results not found.</p>" >> "$OUT_DIR/assembly_summary.html"
-fi
-
-# Add rnaQuast section
-cat >> "$OUT_DIR/assembly_summary.html" << EOF
-        </div>
-        
-        <div class="section">
-            <h2>rnaQuast Assessment</h2>
-EOF
-
-# Extract rnaQuast results
-if [[ -f "$RNAQUAST_DIR/basic_metrics.tsv" ]]; then
-    num_transcripts=$(grep "Transcripts" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
-    longest_transcript=$(grep "Longest transcript" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
-    total_length=$(grep "Total length" "$RNAQUAST_DIR/basic_metrics.tsv" | cut -f2)
+if [[ -f "$OUT_DIR/busco_plot.pdf" ]]; then
+    cp "$OUT_DIR/busco_plot.pdf" "$OUT_DIR/busco_plot.pdf"
+    echo '<p><a href="busco_plot.pdf" target="_blank">View BUSCO results (PDF)</a></p>' >> "$OUT_DIR/assembly_summary.html"
     
-    cat >> "$OUT_DIR/assembly_summary.html" << EOF
+    # If there's a BUSCO summary CSV, read some data from it
+    if [[ -f "$OUT_DIR/busco_summary.csv" ]]; then
+        complete_single=$(grep "Complete (single)" "$OUT_DIR/busco_summary.csv" | cut -d, -f3)
+        complete_dupl=$(grep "Complete (duplicated)" "$OUT_DIR/busco_summary.csv" | cut -d, -f3)
+        fragmented=$(grep "Fragmented" "$OUT_DIR/busco_summary.csv" | cut -d, -f3)
+        missing=$(grep "Missing" "$OUT_DIR/busco_summary.csv" | cut -d, -f3)
+        
+        cat >> "$OUT_DIR/assembly_summary.html" << EOF
             <table>
                 <tr><th>Metric</th><th>Value</th></tr>
-                <tr><td class="metric">Number of transcripts</td><td class="value">$num_transcripts</td></tr>
-                <tr><td class="metric">Longest transcript</td><td class="value">$longest_transcript</td></tr>
-                <tr><td class="metric">Total length</td><td class="value">$total_length</td></tr>
+                <tr><td class="metric">Complete (single-copy)</td><td class="value">${complete_single}%</td></tr>
+                <tr><td class="metric">Complete (duplicated)</td><td class="value">${complete_dupl}%</td></tr>
+                <tr><td class="metric">Fragmented</td><td class="value">${fragmented}%</td></tr>
+                <tr><td class="metric">Missing</td><td class="value">${missing}%</td></tr>
             </table>
 EOF
-
-    # Copy rnaQuast plots if they exist
-    if [[ -f "$RNAQUAST_DIR/report.pdf" ]]; then
-        cp "$RNAQUAST_DIR/report.pdf" "$OUT_DIR/rnaquast_report.pdf"
-        echo '<p><a href="rnaquast_report.pdf" target="_blank">View detailed rnaQuast report (PDF)</a></p>' >> "$OUT_DIR/assembly_summary.html"
     fi
 else
-    echo "<p>rnaQuast results not found.</p>" >> "$OUT_DIR/assembly_summary.html"
+    echo "<p>BUSCO results not found.</p>" >> "$OUT_DIR/assembly_summary.html"
 fi
 
 # Close HTML
@@ -318,6 +295,7 @@ if [[ $? -eq 0 && -f "$OUT_DIR/assembly_summary.html" ]]; then
     
     echo "Visualization completed successfully in $runtime seconds" | tee -a $VIZ_LOG
     echo "Output HTML: $OUT_DIR/assembly_summary.html" | tee -a $VIZ_LOG
+    echo "Visualization,,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
 else
     echo "Error: Visualization failed!" | tee -a $VIZ_LOG
     exit 1
