@@ -73,3 +73,6 @@ mosquito_denovo/
 - **BUSCO**: Transcriptome assembly quality assessment
 - **rnaQuast**: Transcriptome assembly quality assessment
 - **R**: Visualization and comparison graphs
+- **Augustus**
+- **exonify**
+- **blat**
