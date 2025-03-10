@@ -19,7 +19,7 @@ SUMMARY_FILE=${5:-"logs/pipeline_summary.csv"}
 # Create output directory if it doesn't exist
 mkdir -p $OUTPUT_DIR
 mkdir -p $LOG_DIR
-
+#
 # Create a log file for this BUSCO job
 BUSCO_LOG="$LOG_DIR/busco_$(date +%Y%m%d_%H%M%S).log"
 echo "Starting BUSCO job at $(date)" > $BUSCO_LOG
