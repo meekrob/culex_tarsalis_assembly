@@ -1,0 +1,1 @@
+This simple pipeline will run repeatmasker on the draft genome
