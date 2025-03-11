@@ -15,14 +15,10 @@ start_time=$(date +%s)
 source ~/.bashrc
 
 # Parse command line arguments
-reference_transcriptome=""
 debug_mode=false
 
-while getopts "R:d" opt; do
+while getopts "d" opt; do
   case $opt in
-    R)
-      reference_transcriptome="$OPTARG"
-      ;;
     d)
       debug_mode=true
       ;;
@@ -88,9 +84,6 @@ echo "====== Mosquito RNA-Seq Pipeline ======"
 echo "Data directory: $data_base"
 echo "Results directory: $result_base"
 echo "Logs directory: $logs_base"
-if [[ -n "$reference_transcriptome" && -f "$reference_transcriptome" ]]; then
-    echo "Reference transcriptome: $reference_transcriptome"
-fi
 if [[ "$debug_mode" == true ]]; then
     echo "Running in DEBUG mode - will skip steps with existing outputs"
 fi

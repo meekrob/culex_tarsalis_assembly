@@ -73,7 +73,8 @@ fastp \
     --html "$HTML_REPORT" \
     --json "$JSON_REPORT" \
     --detect_adapter_for_pe \
-    --thread=4 \
+    -w=4 \
+    -q=20 \
     --compression=6 \
     2>> $TRIM_LOG
 
