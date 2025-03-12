@@ -37,3 +37,9 @@ run the script for repeatmasker
 ```
 RepeatMasker -s -lib -uncurated mosquito_repeat_lib.fasta $1 -pa 4 -dir .
 ```
+
+
+
+#comands i need to finish running
+find /nfs/home/rsbg/01_fastq/ -maxdepth 1 -type d -not -path "/nfs/home/rsbg/01_fastq/" | parallel -j16 rsync -avhzP --exclude="*/subsample/*" --exclude="*/trinity-work/*" --include="*/" --include="*.fastq.gz" --exclude="*" {}/ . > rsync_output.log 2>&1 &  (wd: ~/Projects/mosquito_denovo/data/raw_reads)
+[2]+  Running                 wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.14.h5.gz > mosquito_repeat.hmm &
