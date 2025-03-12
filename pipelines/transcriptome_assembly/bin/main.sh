@@ -38,7 +38,8 @@ PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
 
 # Define base directories with pipeline-specific paths
 current_dir=$(pwd)
-data_base="${1:-${current_dir}/${PIPELINE_NAME}_data}"
+project_dir="$( cd "$( dirname "$current_dir" )" && pwd )"
+data_base="${1:-${project_dir}/data/raw_reads}"
 result_base="${2:-${current_dir}/${PIPELINE_NAME}_results}"
 logs_base="${current_dir}/${PIPELINE_NAME}_logs"
 temp_dir="${current_dir}/${PIPELINE_NAME}_temp"
@@ -109,6 +110,9 @@ if [[ -d "$data_base" ]]; then
     
     if [[ ${#r1_files[@]} -eq 0 || ${#r2_files[@]} -eq 0 ]]; then
         echo "No valid read files found in $data_base"
+        echo "Looking for files with pattern *R1* and *R2*"
+        echo "Available files in directory:"
+        ls -la "$data_base"
         exit 1
     fi
     
