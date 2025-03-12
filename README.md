@@ -1,0 +1,1 @@
+![Pipeline visualization](config/Mosquito_broad_git_workflow.png)
