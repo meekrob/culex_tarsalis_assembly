@@ -78,6 +78,7 @@ fastp \
     --html "$HTML_REPORT" \
     --json "$JSON_REPORT" \
     --detect_adapter_for_pe \
+    --dedup \
     -w=4 \
     -q=20 \
     --compression=6 \
