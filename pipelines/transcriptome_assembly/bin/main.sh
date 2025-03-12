@@ -31,23 +31,26 @@ done
 
 shift $((OPTIND-1))
 
-# Determine script location to make paths relative to this pipeline
+# Get the repository root directory (where the script is being called from)
+REPO_ROOT=$(pwd)
+
+# Determine script location
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PIPELINE_DIR="$( dirname "$SCRIPT_DIR" )"
 PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
 
-# Define base directories with pipeline-specific paths
-current_dir=$(pwd)
-data_dir="${current_dir}/data/raw_reads"
+# Define directories using the repository root
+data_dir="${REPO_ROOT}/data/raw_reads"
 data_base="${1:-$data_dir}"
-result_base="${2:-${current_dir}/${PIPELINE_NAME}_results}"
-logs_base="${current_dir}/${PIPELINE_NAME}_logs"
-temp_dir="${current_dir}/${PIPELINE_NAME}_temp"
+result_base="${2:-${REPO_ROOT}/${PIPELINE_NAME}_results}"
+logs_base="${REPO_ROOT}/${PIPELINE_NAME}_logs"
+temp_dir="${REPO_ROOT}/${PIPELINE_NAME}_temp"
 
+# Debug all directory paths
 echo "Running pipeline: $PIPELINE_NAME"
+echo "Repository root: $REPO_ROOT"
 echo "Script directory: $SCRIPT_DIR"
 echo "Pipeline directory: $PIPELINE_DIR"
-echo "Current directory: $current_dir"
 echo "Data directory path: $data_dir"
 echo "Data base: $data_base"
 echo "Results base: $result_base"
@@ -90,6 +93,12 @@ mkdir -p "$norm_logs"
 mkdir -p "$assembly_logs"
 mkdir -p "$busco_logs"
 
+# Create lists for read files
+r1_list="${temp_dir}/r1_files.txt"
+r2_list="${temp_dir}/r2_files.txt"
+trimmed_r1_list="${temp_dir}/trimmed_r1_files.txt"
+trimmed_r2_list="${temp_dir}/trimmed_r2_files.txt"
+
 # Create summary file
 summary_file="${logs_base}/pipeline_summary.csv"
 echo "Step,Sample,Metric,Value" > "$summary_file"
@@ -104,31 +113,28 @@ if [[ "$debug_mode" == true ]]; then
 fi
 echo "======================================"
 
-# Find input files
-if [[ -d "$data_base" ]]; then
-    # Find all valid input read files (non-empty files with R1 or R2 in their names)
-    mapfile -t r1_files < <(find "$data_base" -name "*R1*" -not -empty | sort)
-    mapfile -t r2_files < <(find "$data_base" -name "*R2*" -not -empty | sort)
-    
-    if [[ ${#r1_files[@]} -eq 0 || ${#r2_files[@]} -eq 0 ]]; then
-        echo "No valid read files found in $data_base"
-        echo "Looking for files with pattern *R1* and *R2*"
-        echo "Available files in directory:"
-        ls -la "$data_base"
-        exit 1
-    fi
-    
-    echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
-else
+# Check if data directory exists and find input files
+if [[ ! -d "$data_base" ]]; then
     echo "Data directory not found: $data_base"
+    echo "Please make sure this directory exists and contains read files."
+    echo "Directory structure from repo root:"
+    find "$REPO_ROOT" -type d -maxdepth 3 | sort
     exit 1
 fi
 
-# Create temporary files for file lists
-r1_list="${temp_dir}/r1_files.txt"
-r2_list="${temp_dir}/r2_files.txt"
-trimmed_r1_list="${temp_dir}/trimmed_r1_files.txt"
-trimmed_r2_list="${temp_dir}/trimmed_r2_files.txt"
+# Find all valid input read files (non-empty files with R1 or R2 in their names)
+mapfile -t r1_files < <(find "$data_base" -name "*R1*" -not -empty | sort)
+mapfile -t r2_files < <(find "$data_base" -name "*R2*" -not -empty | sort)
+
+if [[ ${#r1_files[@]} -eq 0 || ${#r2_files[@]} -eq 0 ]]; then
+    echo "No valid read files found in $data_base"
+    echo "Looking for files with pattern *R1* and *R2*"
+    echo "Available files in directory:"
+    ls -la "$data_base"
+    exit 1
+fi
+
+echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
 
 # Initialize file lists
 > "$r1_list"
