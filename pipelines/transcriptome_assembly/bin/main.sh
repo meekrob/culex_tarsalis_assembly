@@ -39,7 +39,8 @@ PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
 # Define base directories with pipeline-specific paths
 current_dir=$(pwd)
 project_dir="$current_dir"  # Use current directory as project directory
-data_base="${1:-${project_dir}/data/raw_reads}"
+data_dir="$project_dir/data/raw_reads"  # Explicitly point to the raw_reads directory
+data_base="${1:-$data_dir}"
 result_base="${2:-${current_dir}/${PIPELINE_NAME}_results}"
 logs_base="${current_dir}/${PIPELINE_NAME}_logs"
 temp_dir="${current_dir}/${PIPELINE_NAME}_temp"
