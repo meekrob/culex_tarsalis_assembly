@@ -81,6 +81,7 @@ fastp \
     --dedup \
     -w=4 \
     -q=20 \
+    --dedup \
     --compression=6 \
     2>> $TRIM_LOG
 
