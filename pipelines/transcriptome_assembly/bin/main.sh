@@ -38,8 +38,7 @@ PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
 
 # Define base directories with pipeline-specific paths
 current_dir=$(pwd)
-project_dir="$current_dir"  # Use current directory as project directory
-data_dir="$project_dir/data/raw_reads"  # Explicitly point to the raw_reads directory
+data_dir="${current_dir}/data/raw_reads"
 data_base="${1:-$data_dir}"
 result_base="${2:-${current_dir}/${PIPELINE_NAME}_results}"
 logs_base="${current_dir}/${PIPELINE_NAME}_logs"
@@ -48,6 +47,8 @@ temp_dir="${current_dir}/${PIPELINE_NAME}_temp"
 echo "Running pipeline: $PIPELINE_NAME"
 echo "Script directory: $SCRIPT_DIR"
 echo "Pipeline directory: $PIPELINE_DIR"
+echo "Current directory: $current_dir"
+echo "Data directory path: $data_dir"
 echo "Data base: $data_base"
 echo "Results base: $result_base"
 echo "Logs base: $logs_base"
