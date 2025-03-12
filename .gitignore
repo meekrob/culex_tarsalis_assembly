@@ -14,5 +14,6 @@
 *.pack
 *.sample
 *.idx
+*.sif
 logs/
 temp/
