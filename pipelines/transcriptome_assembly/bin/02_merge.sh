@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # slurm parameters, see config/parameters.txt
-#SBATCH --partition=short-cpu
+#SBATCH --partition=day-long-cpu
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=16
