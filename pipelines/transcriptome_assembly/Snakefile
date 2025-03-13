@@ -34,14 +34,13 @@ rule trim_reads:
 
 rule merge_reads:
     input:
-        r1 = expand(f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R1_trimmed.fastq.gz", sample=ta_config["samples"]),
-        r2 = expand(f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R2_trimmed.fastq.gz", sample=ta_config["samples"])
+        r1 = expand("results/transcriptome_assembly/01_trimmed/{sample}_R1_trimmed.fastq.gz", sample=ta_config["samples"]),
+        r2 = expand("results/transcriptome_assembly/01_trimmed/{sample}_R2_trimmed.fastq.gz", sample=ta_config["samples"])
     output:
-        r1 = f"{ta_config['output_dir']}/02_merged/merged_reads_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/02_merged/merged_reads_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/02_merged/merged_reads_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/02_merged/merged_reads_R2.fastq.gz"
     log:
-        r1 = f"{ta_config['log_dir']}/02_merge/merge_R1.log",
-        r2 = f"{ta_config['log_dir']}/02_merge/merge_R2.log"
+        "logs/transcriptome_assembly/02_merge/merge.log"
     conda:
         ta_config["conda_env"]
     resources:
@@ -51,8 +50,8 @@ rule merge_reads:
         mem = slurm_config["transcriptome"]["merge"]["mem"]
     shell:
         """
-        pigz -dc {input.r1} | pigz -c > {output.r1} 2>> {log.r1}
-        pigz -dc {input.r2} | pigz -c > {output.r2} 2>> {log.r2}
+        pigz -dc {input.r1} | pigz -c > {output.r1} 2>> {log}
+        pigz -dc {input.r2} | pigz -c > {output.r2} 2>> {log}
         """
 
 rule check_pairs:
