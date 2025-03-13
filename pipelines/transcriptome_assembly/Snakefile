@@ -56,13 +56,13 @@ rule merge_reads:
 
 rule check_pairs:
     input:
-        r1 = f"{ta_config['output_dir']}/02_merged/merged_reads_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/02_merged/merged_reads_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/02_merged/merged_reads_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/02_merged/merged_reads_R2.fastq.gz"
     output:
-        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/03_pairs/fixed_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/03_pairs/fixed_R2.fastq.gz"
     log:
-        f"{ta_config['log_dir']}/03_pairs/pair_check.log"
+        "logs/transcriptome_assembly/03_pairs/pair_check.log"
     conda:
         ta_config["conda_env"]
     resources:
