@@ -99,13 +99,15 @@ rule normalize_bbnorm:
 
 rule normalize_trinity:
     input:
-        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/03_pairs/fixed_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/03_pairs/fixed_R2.fastq.gz"
     output:
-        r1 = f"{ta_config['output_dir']}/04_normalized/trinity/norm_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/04_normalized/trinity/norm_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/04_normalized/trinity/norm_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/04_normalized/trinity/norm_R2.fastq.gz"
     log:
-        f"{ta_config['log_dir']}/04_normalization/trinity/trinity_norm.log"
+        "logs/transcriptome_assembly/04_normalization/trinity/trinity_norm.log"
+    params:
+        temp_dir = ta_config['temp_dir']
     conda:
         ta_config["trinity_env"]
     resources:
@@ -117,10 +119,10 @@ rule normalize_trinity:
         """
         Trinity --seqType fq --JM {resources.mem} --max_cov 100 \
                 --left {input.r1} --right {input.r2} --pairs_together \
-                --PARALLEL_STATS --CPU {resources.cpus} --output {ta_config['temp_dir']}/trinity_norm_tmp
-        gzip -c {ta_config['temp_dir']}/trinity_norm_tmp/left.norm.fq > {output.r1}
-        gzip -c {ta_config['temp_dir']}/trinity_norm_tmp/right.norm.fq > {output.r2}
-        rm -rf {ta_config['temp_dir']}/trinity_norm_tmp
+                --PARALLEL_STATS --CPU {resources.cpus} --output {params.temp_dir}/trinity_norm_tmp
+        gzip -c {params.temp_dir}/trinity_norm_tmp/left.norm.fq > {output.r1}
+        gzip -c {params.temp_dir}/trinity_norm_tmp/right.norm.fq > {output.r2}
+        rm -rf {params.temp_dir}/trinity_norm_tmp
         """
 
 rule assemble:
