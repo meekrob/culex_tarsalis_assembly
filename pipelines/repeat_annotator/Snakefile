@@ -1,0 +1,24 @@
+configfile: "config/config.yaml"
+ra_config = config["repeat_annotator"]
+slurm_config = config["slurm"]
+
+rule repeatmasker:
+    input:
+        genome = lambda wc: f"{ra_config['genome_dir']}/{os.listdir(ra_config['genome_dir'])[0]}",
+        repeat_lib = ra_config["repeat_lib"]
+    output:
+        masked = f"{ra_config['output_dir']}/{os.path.basename(ra_config['genome_dir'])}.masked"
+    log:
+        f"{ra_config['log_dir']}/repeatmasker.log"
+    conda:
+        ra_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["repeat"]["repeatmasker"]["time"],
+        cpus = slurm_config["repeat"]["repeatmasker"]["cpus"],
+        mem = slurm_config["repeat"]["repeatmasker"]["mem"]
+    shell:
+        """
+        RepeatMasker -s -lib {input.repeat_lib} {input.genome} -pa {resources.cpus} \
+                     -dir {ra_config['output_dir']} 2>> {log}
+        """

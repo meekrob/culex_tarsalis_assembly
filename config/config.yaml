@@ -1,0 +1,54 @@
+# Base directories
+repo_root: "."
+data_dir: "{repo_root}/data"
+results_dir: "{repo_root}/results"
+logs_dir: "{repo_root}/logs"
+temp_dir: "{repo_root}/temp"
+
+# Pipeline-specific settings
+transcriptome_assembly:
+  raw_reads_dir: "{data_dir}/raw_reads"
+  output_dir: "{results_dir}/transcriptome_assembly"
+  log_dir: "{logs_dir}/transcriptome_assembly"
+  temp_dir: "{temp_dir}/transcriptome_assembly"
+  samples: []  # Will be populated dynamically or manually
+  conda_env: "cellSquito"
+  trinity_env: "trinity"
+
+maker_annotator:
+  genome_dir: "{data_dir}/genome"
+  bam_file: "{data_dir}/transcriptome.bam"
+  output_dir: "{results_dir}/maker_annotator"
+  log_dir: "{logs_dir}/maker_annotator"
+  temp_dir: "{temp_dir}/maker_annotator"
+  species_name: "mosquito"
+  sif_path: "{repo_root}/pipelines/maker_annotator/braker.sif"
+
+repeat_annotator:
+  genome_dir: "{data_dir}/genome"
+  repeat_lib: "{data_dir}/repeats/mosquito_repeat_lib.fasta"
+  output_dir: "{results_dir}/repeat_annotator"
+  log_dir: "{logs_dir}/repeat_annotator"
+  temp_dir: "{temp_dir}/repeat_annotator"
+  conda_env: "repeatmasker"
+
+# SLURM defaults
+slurm:
+  default:
+    partition: "day-long-cpu"
+    time: "24:00:00"
+    nodes: 1
+    cpus: 16
+    mem: "64G"
+  transcriptome:
+    trimming: { time: "01:00:00", cpus: 4, mem: "8G" }
+    merge: { time: "24:00:00", cpus: 16, mem: "64G" }
+    pair_check: { time: "12:00:00", cpus: 8, mem: "32G" }
+    bbnorm: { time: "12:00:00", cpus: 32, mem: "128G" }
+    trinity_norm: { time: "12:00:00", cpus: 32, mem: "128G" }
+    assembly: { partition: "week-long-highmem", time: "168:00:00", cpus: 64, mem: "250G" }
+    busco: { time: "24:00:00", cpus: 16, mem: "32G" }
+  maker:
+    braker: { time: "24:00:00", cpus: 16, mem: "64G" }
+  repeat:
+    repeatmasker: { time: "24:00:00", cpus: 16, mem: "100G" }

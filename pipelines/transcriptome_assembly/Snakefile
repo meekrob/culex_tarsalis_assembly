@@ -1,0 +1,162 @@
+configfile: "config/config.yaml"
+ta_config = config["transcriptome_assembly"]
+slurm_config = config["slurm"]
+
+rule trim_reads:
+    input:
+        r1 = lambda wc: f"{ta_config['raw_reads_dir']}/{wc.sample}_R1.fastq.gz",
+        r2 = lambda wc: f"{ta_config['raw_reads_dir']}/{wc.sample}_R2.fastq.gz"
+    output:
+        r1 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R1_trimmed.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R2_trimmed.fastq.gz",
+        html = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.html",
+        json = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.json"
+    log:
+        f"{ta_config['log_dir']}/01_trimming/{{sample}}_trim.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["trimming"]["time"],
+        cpus = slurm_config["transcriptome"]["trimming"]["cpus"],
+        mem = slurm_config["transcriptome"]["trimming"]["mem"]
+    shell:
+        """
+        fastp -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2} \
+              --html {output.html} --json {output.json} \
+              --detect_adapter_for_pe --dedup -w {resources.cpus} -q 20 \
+              --compression=6 2>> {log}
+        """
+
+rule merge_reads:
+    input:
+        r1 = expand(f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R1_trimmed.fastq.gz", sample=ta_config["samples"]),
+        r2 = expand(f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R2_trimmed.fastq.gz", sample=ta_config["samples"])
+    output:
+        r1 = f"{ta_config['output_dir']}/02_merged/merged_reads_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/02_merged/merged_reads_R2.fastq.gz"
+    log:
+        r1 = f"{ta_config['log_dir']}/02_merge/merge_R1.log",
+        r2 = f"{ta_config['log_dir']}/02_merge/merge_R2.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["merge"]["time"],
+        cpus = slurm_config["transcriptome"]["merge"]["cpus"],
+        mem = slurm_config["transcriptome"]["merge"]["mem"]
+    shell:
+        """
+        pigz -dc {input.r1} | pigz -c > {output.r1} 2>> {log.r1}
+        pigz -dc {input.r2} | pigz -c > {output.r2} 2>> {log.r2}
+        """
+
+rule check_pairs:
+    input:
+        r1 = f"{ta_config['output_dir']}/02_merged/merged_reads_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/02_merged/merged_reads_R2.fastq.gz"
+    output:
+        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+    log:
+        f"{ta_config['log_dir']}/03_pairs/pair_check.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["pair_check"]["time"],
+        cpus = slurm_config["transcriptome"]["pair_check"]["cpus"],
+        mem = slurm_config["transcriptome"]["pair_check"]["mem"]
+    shell:
+        """
+        bbmap/repair.sh in1={input.r1} in2={input.r2} out1={output.r1} out2={output.r2} 2>> {log}
+        """
+
+rule normalize_bbnorm:
+    input:
+        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+    output:
+        r1 = f"{ta_config['output_dir']}/04_normalized/bbnorm/norm_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/04_normalized/bbnorm/norm_R2.fastq.gz"
+    log:
+        f"{ta_config['log_dir']}/04_normalization/bbnorm/bbnorm.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["bbnorm"]["time"],
+        cpus = slurm_config["transcriptome"]["bbnorm"]["cpus"],
+        mem = slurm_config["transcriptome"]["bbnorm"]["mem"]
+    shell:
+        """
+        bbnorm.sh in={input.r1} in2={input.r2} out={output.r1} out2={output.r2} \
+                  target=100 min=5 threads={resources.cpus} 2>> {log}
+        """
+
+rule normalize_trinity:
+    input:
+        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+    output:
+        r1 = f"{ta_config['output_dir']}/04_normalized/trinity/norm_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/04_normalized/trinity/norm_R2.fastq.gz"
+    log:
+        f"{ta_config['log_dir']}/04_normalization/trinity/trinity_norm.log"
+    conda:
+        ta_config["trinity_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["trinity_norm"]["time"],
+        cpus = slurm_config["transcriptome"]["trinity_norm"]["cpus"],
+        mem = slurm_config["transcriptome"]["trinity_norm"]["mem"]
+    shell:
+        """
+        Trinity --seqType fq --JM {resources.mem} --max_cov 100 \
+                --left {input.r1} --right {input.r2} --pairs_together \
+                --PARALLEL_STATS --CPU {resources.cpus} --output {ta_config['temp_dir']}/trinity_norm_tmp
+        gzip -c {ta_config['temp_dir']}/trinity_norm_tmp/left.norm.fq > {output.r1}
+        gzip -c {ta_config['temp_dir']}/trinity_norm_tmp/right.norm.fq > {output.r2}
+        rm -rf {ta_config['temp_dir']}/trinity_norm_tmp
+        """
+
+rule assemble:
+    input:
+        r1 = f"{ta_config['output_dir']}/04_normalized/{{norm}}/norm_R1.fastq.gz",
+        r2 = f"{ta_config['output_dir']}/04_normalized/{{norm}}/norm_R2.fastq.gz"
+    output:
+        fasta = f"{ta_config['output_dir']}/05_assembly/{{norm}}/transcripts.fasta"
+    log:
+        f"{ta_config['log_dir']}/05_assembly/{{norm}}/assembly.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["transcriptome"]["assembly"]["partition"],
+        time = slurm_config["transcriptome"]["assembly"]["time"],
+        cpus = slurm_config["transcriptome"]["assembly"]["cpus"],
+        mem = slurm_config["transcriptome"]["assembly"]["mem"]
+    shell:
+        """
+        rnaspades.py --rna -1 {input.r1} -2 {input.r2} -o {ta_config['output_dir']}/05_assembly/{wildcards.norm} \
+                     -t {resources.cpus} -m {resources.mem} 2>> {log}
+        """
+
+rule busco:
+    input:
+        f"{ta_config['output_dir']}/05_assembly/{{norm}}/transcripts.fasta"
+    output:
+        f"{ta_config['output_dir']}/06_busco/{{norm}}/run_diptera_odb10/short_summary.txt"
+    log:
+        f"{ta_config['log_dir']}/06_busco/{{norm}}/busco.log"
+    conda:
+        ta_config["conda_env"]
+    resources:
+        partition = slurm_config["default"]["partition"],
+        time = slurm_config["transcriptome"]["busco"]["time"],
+        cpus = slurm_config["transcriptome"]["busco"]["cpus"],
+        mem = slurm_config["transcriptome"]["busco"]["mem"]
+    shell:
+        """
+        busco -i {input} -o {wildcards.norm} -l diptera_odb10 -m transcriptome \
+              -c {resources.cpus} --out_path {ta_config['output_dir']}/06_busco 2>> {log}
+        """
