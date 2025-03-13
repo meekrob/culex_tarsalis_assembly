@@ -4,9 +4,9 @@
 # main.sh - Master control script for mosquito RNA-seq pipeline
 # This script identifies input files, sets up directories, and manages job dependencies
 
-#SBATCH --job-name=main
-#SBATCH --output=./logs/main_%j.out
-#SBATCH --error=./logs/main_%j.err
+#SBATCH --job-name=main_transcriptome
+#SBATCH --output=./logs/transcriptome_assembly/main_%j.out
+#SBATCH --error=./logs/transcriptome_assembly/main_%j.err
 
 # Get start time for timing
 start_time=$(date +%s)
@@ -32,19 +32,17 @@ done
 shift $((OPTIND-1))
 
 # Get the repository root directory (where the script is being called from)
-REPO_ROOT=$(pwd)
-
-# Determine script location
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PIPELINE_DIR="$( dirname "$SCRIPT_DIR" )"
 PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
+REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
 
-# Define directories using the repository root
+# Define standardized directories
 data_dir="${REPO_ROOT}/data/raw_reads"
 data_base="${1:-$data_dir}"
-result_base="${2:-${REPO_ROOT}/${PIPELINE_NAME}_results}"
-logs_base="${REPO_ROOT}/${PIPELINE_NAME}_logs"
-temp_dir="${REPO_ROOT}/${PIPELINE_NAME}_temp"
+result_base="${2:-${REPO_ROOT}/results/${PIPELINE_NAME}}"
+logs_base="${REPO_ROOT}/logs/${PIPELINE_NAME}"
+temp_dir="${REPO_ROOT}/temp/${PIPELINE_NAME}"
 
 # Debug all directory paths
 echo "Running pipeline: $PIPELINE_NAME"
