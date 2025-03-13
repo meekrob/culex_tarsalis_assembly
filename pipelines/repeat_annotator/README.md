@@ -1,63 +1,40 @@
-This simple pipeline will run repeatmasker on the draft genome
+# Repeat Annotation Pipeline
 
-conda env: repeatmasker which is stored here ~/pipelines/repeat_annotator/config/environment.yml
+## Goal
+Mask repetitive elements in a genome using RepeatMasker.
 
+## Pipeline Steps
+1. **RepeatMasker**: Masks repeats with a custom library
 
-
-
-steps to run this pipeline
-
-create conda environment and activate it.
-
-```
-conda create -f ~/pipelines/repeat_annotator/config/environment.yml > repeatmasker
-
-**its important to make sure RepeatMasker and h5py are installed, they should be in conda env
-```
-
-download the relevant dfam databases
-```
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.0.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.1.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.2.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.3.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.4.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.5.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.6.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.7.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.8.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.9.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.10.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.11.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.12.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.13.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.14.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.15.h5.gz
-wget https://www.dfam.org/releases/current/families/FamDB/dfam39_full.16.h5.gz
-```
-put them in a directory
-```
-mkdir dfam
-mv dfam39*gz dfam/
-```
-
-gunzip the downloads
-```
-gunzip dfam/dfam39*.gz
-```
-
-clone the FamDB repo
-```
+## Setup
+1. **Create Repeat Library**:
+```bash
+mkdir -p data/repeats/dfam
+cd data/repeats/dfam
+# Download dfam files (e.g., wget https://dfam.org/releases/current/families/FamDB/dfam39_full.*.h5.gz)
+gunzip dfam39*.gz
 git clone git@github.com:Dfam-consortium/FamDB.git
+./FamDB/famdb.py -i . families -f fasta_name -ad 'Diptera' > ../mosquito_repeat_lib.fasta
 ```
 
-make repeat.hmm usable:
-```
-./FamDB/famdb.py -i dfam families -f fasta_name -ad 'Diptera' > mosquito_repeats.fasta
+2. **Conda Environment**:
+```bash
+conda env create -f config/environment.yml -n repeatmasker
 ```
 
-run the script for repeatmasker
+## Usage
+```bash
+# Run with default paths (data/genome/, data/repeats/mosquito_repeat_lib.fasta)
+sbatch pipelines/repeat_annotator/bin/main.sh
 
+# Specify custom paths
+sbatch pipelines/repeat_annotator/bin/main.sh /path/to/genome /path/to/results
 ```
-RepeatMasker -s -lib -uncurated mosquito_repeat_lib.fasta $1 -pa 4 -dir .
-```
+
+## Directory Structure
+- **Input**:
+  - `data/genome/` (FASTA file)
+  - `data/repeats/mosquito_repeat_lib.fasta`
+- **Output**: `results/repeat_annotator/` (masked genome)
+- **Logs**: `logs/repeat_annotator/`
+- **Temp**: `temp/repeat_annotator/`

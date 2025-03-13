@@ -1,8 +1,43 @@
 # Transcriptome Assembly Pipeline
 
-## Denovo mosquito transcriptome assembly pipeline
+## Goal
+Build a high-quality de novo mosquito transcriptome to improve the reference.
 
-### Goal: Build a higher quality transcriptome pipeline to improve the reference transcriptome
+## Pipeline Steps
+1. **Quality Trimming**: `fastp` for read trimming
+2. **Merging**: Combines reads from multiple samples
+3. **Pair Checking**: Validates paired-end consistency
+4. **Normalization**: Two methods (BBNorm and Trinity) run in parallel
+5. **Assembly**: `rnaSPAdes` for de novo assembly
+6. **Quality Assessment**: `BUSCO` evaluation
+
+## Usage
+```bash
+# Run with default paths (data/raw_reads/, results/transcriptome_assembly/)
+sbatch pipelines/transcriptome_assembly/bin/main.sh
+
+# Specify custom paths
+sbatch pipelines/transcriptome_assembly/bin/main.sh /path/to/reads /path/to/results
+
+# Debug mode (skips steps with existing outputs)
+sbatch pipelines/transcriptome_assembly/bin/main.sh -d
+```
+
+## Directory Structure
+- **Input**: `data/raw_reads/` (FASTQ files named with R1 and R2)
+- **Output**: `results/transcriptome_assembly/`
+  - `01_trimmed/`: Trimmed reads
+  - `02_merged/`: Merged reads
+  - `03_pairs/`: Paired reads
+  - `04_normalized/`: Normalized reads (bbnorm/ and trinity/)
+  - `05_assembly/`: Assembled transcripts
+  - `06_busco/`: BUSCO results
+- **Logs**: `logs/transcriptome_assembly/`
+- **Temp**: `temp/transcriptome_assembly/`
+
+## Notes
+- Runs two normalization methods for comparison
+- Check `logs/transcriptome_assembly/pipeline_summary.csv` for run statistics
 
 ### Pipeline Visualization
 ![Pipeline visualization](config/simple_mosquito_denovo.png)

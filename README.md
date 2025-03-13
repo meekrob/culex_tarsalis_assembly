@@ -4,10 +4,34 @@
 
 A comprehensive collection of pipelines for mosquito genome and transcriptome analysis. This repository contains standardized workflows for transcriptome assembly, genome annotation, and repeat identification.
 
+## Pipeline Summary
+
+| Pipeline              | Purpose                     | Input Directory         | Output Directory                  |
+|-----------------------|-----------------------------|--------------------------|------------------------------------|
+| Transcriptome Assembly | Assemble RNA-seq data      | data/raw_reads/         | results/transcriptome_assembly/   |
+| Maker Annotator       | Annotate genome            | data/genome/            | results/maker_annotator/          |
+| Repeat Annotator      | Mask repeats               | data/genome/, data/repeats/ | results/repeat_annotator/     |
+
 ## Repository Structure
 
-```README.md
-<code_block_to_apply_changes_from>
+```
+mosquito_denovo/
+├── data/                       # Input data files
+│   ├── raw_reads/              # RNA-seq FASTQ files
+│   ├── genome/                 # Genome FASTA files
+│   └── repeats/                # Repeat libraries
+├── results/                    # Results organized by pipeline
+│   ├── transcriptome_assembly/ # Transcriptome assembly results
+│   ├── maker_annotator/        # Genome annotation results
+│   └── repeat_annotator/       # Repeat masking results
+├── logs/                       # Log files organized by pipeline
+├── temp/                       # Temporary files
+├── pipelines/                  # Pipeline scripts
+│   ├── transcriptome_assembly/ # RNA-seq assembly pipeline
+│   ├── maker_annotator/        # BRAKER/MAKER genome annotation
+│   └── repeat_annotator/       # RepeatMasker pipeline
+└── config/                     # Configuration files
+    └── paths.sh                # Centralized path definitions
 ```
 
 ## Pipelines
@@ -59,13 +83,6 @@ sbatch pipelines/repeat_annotator/bin/main.sh [genome_dir] [results_dir]
 
 ## Setup
 
-### Data Preparation
-
-Place your input files in the appropriate directories:
-- RNA-seq reads: `data/raw_reads/`
-- Genome assemblies: `data/genome/`
-- Repeat libraries: `data/repeats/`
-
 ### Directory Structure
 
 Create the required directory structure:
@@ -75,6 +92,14 @@ mkdir -p results/{transcriptome_assembly,maker_annotator,repeat_annotator}
 mkdir -p logs/{transcriptome_assembly,maker_annotator,repeat_annotator}
 mkdir -p temp/{transcriptome_assembly,maker_annotator,repeat_annotator}
 ```
+
+### Data Preparation
+
+Place your input files in the appropriate directories:
+- RNA-seq reads: `data/raw_reads/`
+- Genome assemblies: `data/genome/`
+- Repeat libraries: `data/repeats/`
+- RNA-seq alignment: `data/transcriptome.bam`
 
 ### Dependencies
 
