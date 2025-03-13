@@ -77,13 +77,13 @@ rule check_pairs:
 
 rule normalize_bbnorm:
     input:
-        r1 = f"{ta_config['output_dir']}/03_pairs/fixed_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/03_pairs/fixed_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/03_pairs/fixed_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/03_pairs/fixed_R2.fastq.gz"
     output:
-        r1 = f"{ta_config['output_dir']}/04_normalized/bbnorm/norm_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/04_normalized/bbnorm/norm_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/04_normalized/bbnorm/norm_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/04_normalized/bbnorm/norm_R2.fastq.gz"
     log:
-        f"{ta_config['log_dir']}/04_normalization/bbnorm/bbnorm.log"
+        "logs/transcriptome_assembly/04_normalization/bbnorm/bbnorm.log"
     conda:
         ta_config["conda_env"]
     resources:
