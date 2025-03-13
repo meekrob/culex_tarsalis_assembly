@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # slurm parameters, see config/parameters.txt
-#SBATCH --partition=day-long-cpu
-#SBATCH --time=02:00:00          # Reduced time since each job does less work
+#SBATCH --partition=short-cpu
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --job-name=cat_merge
+#SBATCH --job-name=merge
 # Log files will be specified when submitting the job
 
 # input variables passed in as arguments from main.sh
@@ -23,7 +23,7 @@ mkdir -p $LOG_DIR
 
 # Create a log file for this merge job
 MERGE_LOG="$LOG_DIR/merge_${FILE_TYPE}_$(date +%Y%m%d_%H%M%S).log"
-echo "Starting $FILE_TYPE merge job at $(date)" > $MERGE_LOG
+echo "Starting merge job at $(date)" > $MERGE_LOG
 echo "File list: $FILE_LIST" >> $MERGE_LOG
 echo "Output file: $OUTPUT_FILE" >> $MERGE_LOG
 
@@ -47,13 +47,13 @@ conda activate cellSquito &>/dev/null || true
 
 # Check if pigz is available
 if command -v pigz >/dev/null 2>&1; then
-    COMPRESS_CMD="pigz -p $SLURM_CPUS_PER_TASK"
-    DECOMPRESS_CMD="pigz -dc -p $SLURM_CPUS_PER_TASK"
-    echo "Using pigz for parallel compression/decompression with $SLURM_CPUS_PER_TASK cores" | tee -a $MERGE_LOG
+    COMPRESS_CMD="pigz -c"
+    DECOMPRESS_CMD="pigz -dc"
+    echo "Using pigz for parallel compression/decompression" | tee -a $MERGE_LOG
 else
-    COMPRESS_CMD="gzip"
-    DECOMPRESS_CMD="zcat"
-    echo "Warning: pigz not found, using slower gzip/zcat" | tee -a $MERGE_LOG
+    COMPRESS_CMD="gzip -c"
+    DECOMPRESS_CMD="gunzip -c"
+    echo "Using gzip for compression/decompression" | tee -a $MERGE_LOG
 fi
 
 # Count total files

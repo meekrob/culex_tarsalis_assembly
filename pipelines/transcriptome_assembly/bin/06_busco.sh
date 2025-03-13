@@ -1,62 +1,67 @@
 #!/bin/bash
 
 # slurm parameters, see config/parameters.txt
-#SBATCH --partition=short-cpu
-#SBATCH --time=04:00:00
+#SBATCH --partition=medium-cpu
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
 #SBATCH --job-name=busco
 # Log files will be specified when submitting the job
 
-# input file variables passed in as arguments from main.sh
-TRANSCRIPTOME=$1
+# Input arguments
+ASSEMBLY_FILE=$1
 OUTPUT_DIR=$2
-LOG_DIR=${3:-"logs/04_busco"}
+LOG_DIR=$3
 DEBUG_MODE=${4:-false}
-SUMMARY_FILE=${5:-"logs/pipeline_summary.csv"}
+SUMMARY_FILE=$5
+ASSEMBLY_TYPE=$6  # "bbnorm" or "trinity"
 
 # Create output directory if it doesn't exist
 mkdir -p $OUTPUT_DIR
 mkdir -p $LOG_DIR
 #
 # Create a log file for this BUSCO job
-BUSCO_LOG="$LOG_DIR/busco_$(date +%Y%m%d_%H%M%S).log"
-echo "Starting BUSCO job at $(date)" > $BUSCO_LOG
-echo "Transcriptome: $TRANSCRIPTOME" >> $BUSCO_LOG
-echo "Output directory: $OUTPUT_DIR" >> $BUSCO_LOG
+BUSCO_LOG="${LOG_DIR}/busco_${ASSEMBLY_TYPE}_$(date +%Y%m%d_%H%M%S).log"
+echo "Starting BUSCO analysis at $(date)" > "$BUSCO_LOG"
+echo "Assembly file: $ASSEMBLY_FILE" >> "$BUSCO_LOG"
+echo "Output directory: $OUTPUT_DIR" >> "$BUSCO_LOG"
 
 # Check if input is gzipped
-UNZIPPED_TRANSCRIPTOME=$TRANSCRIPTOME
-if [[ "$TRANSCRIPTOME" == *.gz ]]; then
-    echo "Input transcriptome is gzipped. Decompressing before BUSCO analysis..." | tee -a $BUSCO_LOG
-    UNZIPPED_TRANSCRIPTOME="${TRANSCRIPTOME%.gz}"
-    gunzip -c "$TRANSCRIPTOME" > "$UNZIPPED_TRANSCRIPTOME"
-    echo "Decompressed to: $UNZIPPED_TRANSCRIPTOME" | tee -a $BUSCO_LOG
+UNZIPPED_ASSEMBLY_FILE=$ASSEMBLY_FILE
+if [[ "$ASSEMBLY_FILE" == *.gz ]]; then
+    echo "Input assembly file is gzipped. Decompressing before BUSCO analysis..." | tee -a $BUSCO_LOG
+    UNZIPPED_ASSEMBLY_FILE="${ASSEMBLY_FILE%.gz}"
+    gunzip -c "$ASSEMBLY_FILE" > "$UNZIPPED_ASSEMBLY_FILE"
+    echo "Decompressed to: $UNZIPPED_ASSEMBLY_FILE" | tee -a $BUSCO_LOG
 fi
 
 # Debug mode: Check if output files already exist
-if [[ "$DEBUG_MODE" == "true" && -d "$OUTPUT_DIR" && -f "$OUTPUT_DIR/short_summary.txt" ]]; then
-    echo "Debug mode: BUSCO output already exists: $OUTPUT_DIR/short_summary.txt. Skipping BUSCO." | tee -a $BUSCO_LOG
+if [[ "$DEBUG_MODE" == "true" && -f "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" ]]; then
+    echo "DEBUG: Skipping BUSCO analysis, output exists" | tee -a "$BUSCO_LOG"
     
-    # Add summary entry
-    echo "BUSCO,,Status,Skipped (files exist)" >> "$SUMMARY_FILE"
-    
-    # Clean up decompressed file if we created one
-    if [[ "$TRANSCRIPTOME" == *.gz && "$UNZIPPED_TRANSCRIPTOME" != "$TRANSCRIPTOME" ]]; then
-        rm -f "$UNZIPPED_TRANSCRIPTOME"
+    # Still record stats from existing run
+    if [[ -f "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" ]]; then
+        complete_buscos=$(grep "Complete BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | cut -f 2)
+        complete_percent=$(grep "Complete BUSCOs" "$OUTPUT_DIR/run_diptera_odb10/short_summary.txt" | grep -oP "\d+\.\d+%")
+        
+        echo "Complete BUSCOs: $complete_buscos ($complete_percent)" | tee -a "$BUSCO_LOG"
+        
+        echo "BUSCO,$ASSEMBLY_TYPE,Status,Reused" >> "$SUMMARY_FILE"
+        echo "BUSCO,$ASSEMBLY_TYPE,Complete,$complete_buscos" >> "$SUMMARY_FILE"
+        echo "BUSCO,$ASSEMBLY_TYPE,Complete_Percent,$complete_percent" >> "$SUMMARY_FILE"
     fi
     
     exit 0
 fi
 
 # Check if input file exists
-if [[ ! -s "$UNZIPPED_TRANSCRIPTOME" ]]; then
-    echo "Error: Input transcriptome file is missing or empty!" | tee -a $BUSCO_LOG
-    echo "TRANSCRIPTOME: $UNZIPPED_TRANSCRIPTOME" | tee -a $BUSCO_LOG
+if [[ ! -s "$UNZIPPED_ASSEMBLY_FILE" ]]; then
+    echo "Error: Input assembly file is missing or empty!" | tee -a $BUSCO_LOG
+    echo "ASSEMBLY_FILE: $UNZIPPED_ASSEMBLY_FILE" | tee -a $BUSCO_LOG
     
     # Add summary entry
-    echo "BUSCO,,Status,Failed (missing input)" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Status,Failed (missing input)" >> "$SUMMARY_FILE"
     
     exit 1
 fi
@@ -66,14 +71,14 @@ source ~/.bashrc
 conda activate cellSquito
 
 # Run BUSCO
-echo "Running BUSCO..." | tee -a $BUSCO_LOG
+echo "Running BUSCO analysis..." | tee -a "$BUSCO_LOG"
 
 # Get start time for timing
 start_time=$(date +%s)
 
 # Run BUSCO with appropriate parameters
 busco \
-    -i "$UNZIPPED_TRANSCRIPTOME" \
+    -i "$UNZIPPED_ASSEMBLY_FILE" \
     -o "$(basename $OUTPUT_DIR)" \
     -l diptera_odb10 \
     -m transcriptome \
@@ -92,39 +97,32 @@ if [[ $? -eq 0 && -f "$SUMMARY_FILE_PATH" ]]; then
     echo "BUSCO completed successfully in $runtime seconds" | tee -a $BUSCO_LOG
     
     # Extract BUSCO statistics
-    complete=$(grep "Complete BUSCOs" "$SUMMARY_FILE_PATH" | grep -o "[0-9.]\+%")
-    single=$(grep "Complete and single-copy BUSCOs" "$SUMMARY_FILE_PATH" | grep -o "[0-9]\+")
-    duplicated=$(grep "Complete and duplicated BUSCOs" "$SUMMARY_FILE_PATH" | grep -o "[0-9]\+")
-    fragmented=$(grep "Fragmented BUSCOs" "$SUMMARY_FILE_PATH" | grep -o "[0-9]\+")
-    missing=$(grep "Missing BUSCOs" "$SUMMARY_FILE_PATH" | grep -o "[0-9]\+")
-    total=$(grep "Total BUSCO groups searched" "$SUMMARY_FILE_PATH" | grep -o "[0-9]\+")
+    complete_buscos=$(grep "Complete BUSCOs" "$SUMMARY_FILE_PATH" | cut -f 2)
+    complete_percent=$(grep "Complete BUSCOs" "$SUMMARY_FILE_PATH" | grep -oP "\d+\.\d+%")
+    fragmented=$(grep "Fragmented BUSCOs" "$SUMMARY_FILE_PATH" | cut -f 2)
+    missing=$(grep "Missing BUSCOs" "$SUMMARY_FILE_PATH" | cut -f 2)
     
-    echo "Complete BUSCOs: $complete" | tee -a $BUSCO_LOG
-    echo "Complete and single-copy BUSCOs: $single" | tee -a $BUSCO_LOG
-    echo "Complete and duplicated BUSCOs: $duplicated" | tee -a $BUSCO_LOG
+    echo "Complete BUSCOs: $complete_buscos ($complete_percent)" | tee -a $BUSCO_LOG
     echo "Fragmented BUSCOs: $fragmented" | tee -a $BUSCO_LOG
     echo "Missing BUSCOs: $missing" | tee -a $BUSCO_LOG
-    echo "Total BUSCO groups searched: $total" | tee -a $BUSCO_LOG
     
     # Add summary entries
-    echo "BUSCO,,Status,Completed" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Complete,$complete" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Single-copy,$single" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Duplicated,$duplicated" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Fragmented,$fragmented" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Missing,$missing" >> "$SUMMARY_FILE"
-    echo "BUSCO,,Total,$total" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Status,Completed" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Runtime,$runtime seconds" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Complete,$complete_buscos" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Complete_Percent,$complete_percent" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Fragmented,$fragmented" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Missing,$missing" >> "$SUMMARY_FILE"
 else
     echo "Error: BUSCO failed!" | tee -a $BUSCO_LOG
-    echo "BUSCO,,Status,Failed" >> "$SUMMARY_FILE"
+    echo "BUSCO,$ASSEMBLY_TYPE,Status,Failed" >> "$SUMMARY_FILE"
     exit 1
 fi
 
 # Clean up decompressed file if we created one
-if [[ "$TRANSCRIPTOME" == *.gz && "$UNZIPPED_TRANSCRIPTOME" != "$TRANSCRIPTOME" ]]; then
+if [[ "$ASSEMBLY_FILE" == *.gz && "$UNZIPPED_ASSEMBLY_FILE" != "$ASSEMBLY_FILE" ]]; then
     echo "Cleaning up temporary decompressed file..." | tee -a $BUSCO_LOG
-    rm -f "$UNZIPPED_TRANSCRIPTOME"
+    rm -f "$UNZIPPED_ASSEMBLY_FILE"
 fi
 
 # Move BUSCO output to the specified output directory if needed

@@ -4,15 +4,18 @@
 # main.sh - Master control script for mosquito RNA-seq pipeline
 # This script identifies input files, sets up directories, and manages job dependencies
 
-#SBATCH --job-name=main_transcriptome
+#SBATCH --job-name=transcriptome
 #SBATCH --output=./logs/transcriptome_assembly/main_%j.out
 #SBATCH --error=./logs/transcriptome_assembly/main_%j.err
 
 # Get start time for timing
 start_time=$(date +%s)
 
-# Source conda
+# Source conda and paths
 source ~/.bashrc
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+source "${REPO_ROOT}/config/paths.sh"
 
 # Parse command line arguments
 debug_mode=false
@@ -31,67 +34,39 @@ done
 
 shift $((OPTIND-1))
 
-# Get the repository root directory (where the script is being called from)
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PIPELINE_DIR="$( dirname "$SCRIPT_DIR" )"
-PIPELINE_NAME="$( basename "$PIPELINE_DIR" )"
-REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
-
 # Define standardized directories
-data_dir="${REPO_ROOT}/data/raw_reads"
-data_base="${1:-$data_dir}"
-result_base="${2:-${REPO_ROOT}/results/${PIPELINE_NAME}}"
-logs_base="${REPO_ROOT}/logs/${PIPELINE_NAME}"
-temp_dir="${REPO_ROOT}/temp/${PIPELINE_NAME}"
+data_base="${1:-${RAW_READS_DIR}}"
+result_base="${2:-${RESULTS_DIR}/transcriptome_assembly}"
+logs_base="${LOGS_DIR}/transcriptome_assembly"
+temp_dir="${TEMP_DIR}/transcriptome_assembly"
 
-# Debug all directory paths
-echo "Running pipeline: $PIPELINE_NAME"
-echo "Repository root: $REPO_ROOT"
-echo "Script directory: $SCRIPT_DIR"
-echo "Pipeline directory: $PIPELINE_DIR"
-echo "Data directory path: $data_dir"
-echo "Data base: $data_base"
-echo "Results base: $result_base"
-echo "Logs base: $logs_base"
+# Setup pipeline directories
+setup_pipeline_dirs "transcriptome_assembly"
 
-# Create output directories
-mkdir -p "$result_base"
-mkdir -p "$logs_base"
+# Create step-specific subdirectories
+mkdir -p "${result_base}/01_trimmed"
+mkdir -p "${result_base}/02_merged"
+mkdir -p "${result_base}/03_pairs"
+mkdir -p "${result_base}/04_normalized/bbnorm"
+mkdir -p "${result_base}/04_normalized/trinity"
+mkdir -p "${result_base}/05_assembly/bbnorm"
+mkdir -p "${result_base}/05_assembly/trinity"
+mkdir -p "${result_base}/06_busco/bbnorm"
+mkdir -p "${result_base}/06_busco/trinity"
+
+mkdir -p "${logs_base}/01_trimming"
+mkdir -p "${logs_base}/02_merge"
+mkdir -p "${logs_base}/03_pairs"
+mkdir -p "${logs_base}/04_normalization/bbnorm"
+mkdir -p "${logs_base}/04_normalization/trinity"
+mkdir -p "${logs_base}/05_assembly/bbnorm"
+mkdir -p "${logs_base}/05_assembly/trinity"
+mkdir -p "${logs_base}/06_busco/bbnorm"
+mkdir -p "${logs_base}/06_busco/trinity"
+
 mkdir -p "$temp_dir"
 
-# Define specific output directories
-trimmed_dir="${result_base}/01_trimmed"
-merged_dir="${result_base}/02_merged"
-pairs_dir="${result_base}/03_pairs"
-norm_dir="${result_base}/04_normalized"
-assembly_dir="${result_base}/05_assembly"
-busco_dir="${result_base}/06_busco"
-
-# Create these directories
-mkdir -p "$trimmed_dir"
-mkdir -p "$merged_dir"
-mkdir -p "$pairs_dir"
-mkdir -p "$norm_dir"
-mkdir -p "$assembly_dir"
-mkdir -p "$busco_dir"
-
-# Create specific log directories
-trim_logs="${logs_base}/01_trimming"
-merge_logs="${logs_base}/02_merge"
-pairs_logs="${logs_base}/03_pairs"
-norm_logs="${logs_base}/04_normalization"
-assembly_logs="${logs_base}/05_assembly"
-busco_logs="${logs_base}/06_busco"
-
-# Create log directories
-mkdir -p "$trim_logs"
-mkdir -p "$merge_logs"
-mkdir -p "$pairs_logs"
-mkdir -p "$norm_logs"
-mkdir -p "$assembly_logs"
-mkdir -p "$busco_logs"
-
-# Create lists for read files
+# Define file lists for storing input/output files
 r1_list="${temp_dir}/r1_files.txt"
 r2_list="${temp_dir}/r2_files.txt"
 trimmed_r1_list="${temp_dir}/trimmed_r1_files.txt"
@@ -111,7 +86,7 @@ if [[ "$debug_mode" == true ]]; then
 fi
 echo "======================================"
 
-# Check if data directory exists and find input files
+# Check if data directory exists
 if [[ ! -d "$data_base" ]]; then
     echo "Data directory not found: $data_base"
     echo "Please make sure this directory exists and contains read files."
@@ -120,19 +95,19 @@ if [[ ! -d "$data_base" ]]; then
     exit 1
 fi
 
-# Find all valid input read files (non-empty files with R1 or R2 in their names)
-mapfile -t r1_files < <(find "$data_base" -name "*R1*" -not -empty | sort)
-mapfile -t r2_files < <(find "$data_base" -name "*R2*" -not -empty | sort)
-
-if [[ ${#r1_files[@]} -eq 0 || ${#r2_files[@]} -eq 0 ]]; then
-    echo "No valid read files found in $data_base"
-    echo "Looking for files with pattern *R1* and *R2*"
-    echo "Available files in directory:"
-    ls -la "$data_base"
+# Check available disk space (requiring at least 50GB)
+required_space=$((50 * 1024 * 1024)) # 50GB in KB
+available_space=$(df -k "$result_base" | tail -1 | awk '{print $4}')
+if [[ $available_space -lt $required_space ]]; then
+    echo "Error: Insufficient disk space in results directory"
+    echo "Available: $(($available_space / 1024 / 1024)) GB"
+    echo "Required: $((required_space / 1024 / 1024)) GB"
     exit 1
 fi
 
-echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
+# IMPROVED FILE PAIRING: Use associative arrays for explicit sample matching
+echo "Finding and pairing input files..."
+declare -A r1_files r2_files
 
 # Initialize file lists
 > "$r1_list"
@@ -140,57 +115,120 @@ echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
 > "$trimmed_r1_list"
 > "$trimmed_r2_list"
 
-# Step 1: Submit trimming jobs for all input files
-echo "Submitting trimming jobs..."
-declare -a trim_job_ids=()
-
-for i in "${!r1_files[@]}"; do
-    r1="${r1_files[$i]}"
-    r2="${r2_files[$i]}"
+# Find all R1 and R2 files and organize by sample name
+for file in "$data_base"/*; do
+    # Skip empty or non-regular files
+    if [[ ! -s "$file" || ! -f "$file" ]]; then
+        continue
+    fi
     
-    # Extract sample name from file path
-    filename=$(basename "$r1")
-    sample_name="${filename%%_*}"
+    basename=$(basename "$file")
     
-    # Define output files
-    out_r1="${trimmed_dir}/${sample_name}_R1_trimmed.fastq.gz"
-    out_r2="${trimmed_dir}/${sample_name}_R2_trimmed.fastq.gz"
+    # Match R1 files
+    if [[ "$file" =~ .*R1.* ]]; then
+        # Extract sample name by removing R1 and file extension
+        sample=$(echo "$basename" | sed -E 's/(.*)_?R1.*/\1/')
+        r1_files["$sample"]="$file"
+        echo "Found R1 for sample $sample: $file"
+    fi
     
-    # Add to file lists
-    echo "$r1" >> "$r1_list"
-    echo "$r2" >> "$r2_list"
-    echo "$out_r1" >> "$trimmed_r1_list"
-    echo "$out_r2" >> "$trimmed_r2_list"
-    
-    # Submit trimming job
-    trim_cmd="sbatch --parsable --job-name=trim_${sample_name} --output=${trim_logs}/trim_${sample_name}_%j.out --error=${trim_logs}/trim_${sample_name}_%j.err"
-    trim_job_id=$(eval $trim_cmd $SCRIPT_DIR/01_trimming.sh "$r1" "$r2" "$out_r1" "$out_r2" "$sample_name" "$trim_logs" "$summary_file" "$debug_mode")
-    
-    if [[ -n "$trim_job_id" ]]; then
-        trim_job_ids+=("$trim_job_id")
-        echo "Submitted trimming job for $sample_name: $trim_job_id"
-    else
-        echo "Error: Failed to submit trimming job for $sample_name"
-        exit 1
+    # Match R2 files
+    if [[ "$file" =~ .*R2.* ]]; then
+        # Extract sample name by removing R2 and file extension
+        sample=$(echo "$basename" | sed -E 's/(.*)_?R2.*/\1/')
+        r2_files["$sample"]="$file"
+        echo "Found R2 for sample $sample: $file"
     fi
 done
 
-# Create dependency string for merge jobs
-trim_dependency=""
-if [[ ${#trim_job_ids[@]} -gt 0 ]]; then
-    trim_dependency="--dependency=afterok:$(IFS=:; echo "${trim_job_ids[*]}")"
+# Check if we found any files
+if [[ ${#r1_files[@]} -eq 0 ]]; then
+    echo "Error: No R1 files found in $data_base"
+    echo "Looking for files with pattern *R1* in their names"
+    echo "Available files in directory:"
+    ls -la "$data_base"
+    exit 1
+fi
+
+echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
+
+# Ensure all R1 files have matching R2 files
+sample_count=0
+for sample in "${!r1_files[@]}"; do
+    r1="${r1_files[$sample]}"
+    
+    if [[ -n "${r2_files[$sample]}" ]]; then
+        r2="${r2_files[$sample]}"
+        echo "Paired sample $sample:"
+        echo "  R1: $r1"
+        echo "  R2: $r2"
+        
+        # Add to file lists
+        echo "$r1" >> "$r1_list"
+        echo "$r2" >> "$r2_list"
+        
+        # Define output files for trimming
+        trimmed_r1="${result_base}/01_trimmed/$(basename "$r1")"
+        trimmed_r2="${result_base}/01_trimmed/$(basename "$r2")"
+        trimmed_r1=${trimmed_r1/.fastq.gz/_trimmed.fastq.gz}
+        trimmed_r2=${trimmed_r2/.fastq.gz/_trimmed.fastq.gz}
+        
+        # Add to trimmed file lists
+        echo "$trimmed_r1" >> "$trimmed_r1_list"
+        echo "$trimmed_r2" >> "$trimmed_r2_list"
+        
+        # Submit trimming job for this pair
+        echo "Submitting trimming job for sample $sample..."
+        
+        # Skip if outputs exist and debug mode is on
+        if [[ "$debug_mode" == true && -s "$trimmed_r1" && -s "$trimmed_r2" ]]; then
+            echo "DEBUG: Skipping trimming for $sample, outputs exist"
+            trim_job_id="skipped"
+        else
+            trim_cmd="sbatch --parsable --job-name=trim_${sample} --output=${logs_base}/01_trimming/trim_${sample}_%j.out --error=${logs_base}/01_trimming/trim_${sample}_%j.err"
+            trim_job_id=$(eval $trim_cmd $SCRIPT_DIR/01_trimming.sh "$r1" "$r2" "$trimmed_r1" "$trimmed_r2" "$sample" "${logs_base}/01_trimming" "$summary_file")
+            
+            if [[ -z "$trim_job_id" || "$trim_job_id" == "0" ]]; then
+                echo "Error: Failed to submit trimming job for sample $sample"
+                continue
+            fi
+            
+            echo "Submitted trimming job: $trim_job_id"
+        fi
+        
+        # Add to trim dependency list for merge step
+        if [[ "$trim_job_id" != "skipped" ]]; then
+            if [[ -z "$trim_dependencies" ]]; then
+                trim_dependencies="afterok:$trim_job_id"
+            else
+                trim_dependencies="$trim_dependencies:$trim_job_id"
+            fi
+        fi
+        
+        ((sample_count++))
+    else
+        echo "Warning: No matching R2 file found for sample $sample (R1: $r1)"
+        echo "This sample will be skipped"
+    fi
+done
+
+echo "Processing $sample_count paired samples"
+
+if [[ $sample_count -eq 0 ]]; then
+    echo "Error: No valid sample pairs found. Exiting."
+    exit 1
 fi
 
 # Step 2: Submit merge jobs
 echo "Submitting merge jobs..."
 
 # Define output files for merged reads
-merged_r1="${merged_dir}/merged_R1.fastq.gz"
-merged_r2="${merged_dir}/merged_R2.fastq.gz"
+merged_r1="${result_base}/02_merged/merged_R1.fastq.gz"
+merged_r2="${result_base}/02_merged/merged_R2.fastq.gz"
 
 # Submit merge job for R1 files
-merge_r1_cmd="sbatch --parsable --job-name=merge_R1 --output=${merge_logs}/merge_R1_%j.out --error=${merge_logs}/merge_R1_%j.err $trim_dependency"
-merge_r1_job_id=$(eval $merge_r1_cmd $SCRIPT_DIR/02_merge.sh "$r1_list" "$merged_r1" "R1" "$merge_logs" "$debug_mode" "$summary_file")
+merge_r1_cmd="sbatch --parsable --job-name=merge_R1 --output=${logs_base}/02_merge/merge_R1_%j.out --error=${logs_base}/02_merge/merge_R1_%j.err --dependency=$trim_dependencies"
+merge_r1_job_id=$(eval $merge_r1_cmd $SCRIPT_DIR/02_merge.sh "$r1_list" "$merged_r1" "R1" "${logs_base}/02_merge" "$debug_mode" "$summary_file")
 
 if [[ -n "$merge_r1_job_id" ]]; then
     echo "Submitted merge job for R1: $merge_r1_job_id"
@@ -200,8 +238,8 @@ else
 fi
 
 # Submit merge job for R2 files
-merge_r2_cmd="sbatch --parsable --job-name=merge_R2 --output=${merge_logs}/merge_R2_%j.out --error=${merge_logs}/merge_R2_%j.err $trim_dependency"
-merge_r2_job_id=$(eval $merge_r2_cmd $SCRIPT_DIR/02_merge.sh "$r2_list" "$merged_r2" "R2" "$merge_logs" "$debug_mode" "$summary_file")
+merge_r2_cmd="sbatch --parsable --job-name=merge_R2 --output=${logs_base}/02_merge/merge_R2_%j.out --error=${logs_base}/02_merge/merge_R2_%j.err --dependency=$trim_dependencies"
+merge_r2_job_id=$(eval $merge_r2_cmd $SCRIPT_DIR/02_merge.sh "$r2_list" "$merged_r2" "R2" "${logs_base}/02_merge" "$debug_mode" "$summary_file")
 
 if [[ -n "$merge_r2_job_id" ]]; then
     echo "Submitted merge job for R2: $merge_r2_job_id"
@@ -214,15 +252,15 @@ fi
 echo "Submitting pair checking job..."
 
 # Set output files for fixed paired reads
-fixed_r1="${pairs_dir}/fixed_R1.fastq.gz"
-fixed_r2="${pairs_dir}/fixed_R2.fastq.gz"
+fixed_r1="${result_base}/03_pairs/fixed_R1.fastq.gz"
+fixed_r2="${result_base}/03_pairs/fixed_R2.fastq.gz"
 
 # Make pair checking job dependent on both merge jobs
 check_pairs_dependency="--dependency=afterok:${merge_r1_job_id}:${merge_r2_job_id}"
 
 # Submit pair checking job
-check_pairs_cmd="sbatch --parsable --job-name=check_pairs --output=${pairs_logs}/check_pairs_%j.out --error=${pairs_logs}/check_pairs_%j.err $check_pairs_dependency"
-check_pairs_job_id=$(eval $check_pairs_cmd $SCRIPT_DIR/03_check_pairs.sh "$merged_r1" "$merged_r2" "$fixed_r1" "$fixed_r2" "$pairs_logs" "$summary_file" "$debug_mode")
+check_pairs_cmd="sbatch --parsable --job-name=check_pairs --output=${logs_base}/03_pairs/check_pairs_%j.out --error=${logs_base}/03_pairs/check_pairs_%j.err $check_pairs_dependency"
+check_pairs_job_id=$(eval $check_pairs_cmd $SCRIPT_DIR/03_check_pairs.sh "$merged_r1" "$merged_r2" "$fixed_r1" "$fixed_r2" "${logs_base}/03_pairs" "$summary_file" "$debug_mode")
 
 if [[ -n "$check_pairs_job_id" ]]; then
     echo "Submitted pair checking job: $check_pairs_job_id"
@@ -235,13 +273,13 @@ fi
 echo "Submitting read normalization jobs (BBNorm and Trinity)..."
 
 # Set output files for BBNorm normalized reads
-bbnorm_dir="${norm_dir}/bbnorm"
+bbnorm_dir="${result_base}/04_normalized/bbnorm"
 mkdir -p "$bbnorm_dir"
 bbnorm_r1="${bbnorm_dir}/normalized_R1.fastq.gz"
 bbnorm_r2="${bbnorm_dir}/normalized_R2.fastq.gz"
 
 # Set output files for Trinity normalized reads
-trinity_norm_dir="${norm_dir}/trinity"
+trinity_norm_dir="${result_base}/04_normalized/trinity"
 mkdir -p "$trinity_norm_dir"
 trinity_norm_r1="${trinity_norm_dir}/normalized_R1.fastq.gz"
 trinity_norm_r2="${trinity_norm_dir}/normalized_R2.fastq.gz"
@@ -250,7 +288,7 @@ trinity_norm_r2="${trinity_norm_dir}/normalized_R2.fastq.gz"
 norm_dependency="--dependency=afterok:${check_pairs_job_id}"
 
 # Submit BBNorm normalization job
-bbnorm_logs="${norm_logs}/bbnorm"
+bbnorm_logs="${logs_base}/04_normalization/bbnorm"
 mkdir -p "$bbnorm_logs"
 bbnorm_cmd="sbatch --parsable --job-name=bbnorm --output=${bbnorm_logs}/normalize_%j.out --error=${bbnorm_logs}/normalize_%j.err $norm_dependency"
 bbnorm_job_id=$(eval $bbnorm_cmd $SCRIPT_DIR/04_read_normalization.sh "$fixed_r1" "$fixed_r2" "$bbnorm_r1" "$bbnorm_r2" "$bbnorm_logs" "$summary_file" "$debug_mode")
@@ -263,7 +301,7 @@ else
 fi
 
 # Submit Trinity normalization job
-trinity_norm_logs="${norm_logs}/trinity"
+trinity_norm_logs="${logs_base}/04_normalization/trinity"
 mkdir -p "$trinity_norm_logs"
 trinity_norm_cmd="sbatch --parsable --job-name=trinity_norm --output=${trinity_norm_logs}/normalize_%j.out --error=${trinity_norm_logs}/normalize_%j.err $norm_dependency"
 trinity_norm_job_id=$(eval $trinity_norm_cmd $SCRIPT_DIR/04_trinity_normalization.sh "$fixed_r1" "$fixed_r2" "$trinity_norm_r1" "$trinity_norm_r2" "$trinity_norm_logs" "$summary_file" "$debug_mode")
@@ -279,14 +317,14 @@ fi
 echo "Submitting assembly jobs (one for each normalization method)..."
 
 # Define separate assembly directories
-bbnorm_assembly_dir="${assembly_dir}/bbnorm"
-trinity_norm_assembly_dir="${assembly_dir}/trinity"
+bbnorm_assembly_dir="${result_base}/05_assembly/bbnorm"
+trinity_norm_assembly_dir="${result_base}/05_assembly/trinity"
 mkdir -p "$bbnorm_assembly_dir"
 mkdir -p "$trinity_norm_assembly_dir"
 
 # Define separate assembly log directories
-bbnorm_assembly_logs="${assembly_logs}/bbnorm"
-trinity_norm_assembly_logs="${assembly_logs}/trinity"
+bbnorm_assembly_logs="${logs_base}/05_assembly/bbnorm"
+trinity_norm_assembly_logs="${logs_base}/05_assembly/trinity"
 mkdir -p "$bbnorm_assembly_logs"
 mkdir -p "$trinity_norm_assembly_logs"
 
@@ -320,14 +358,14 @@ fi
 echo "Submitting quality assessment jobs for both assemblies..."
 
 # Define separate BUSCO directories
-bbnorm_busco_dir="${busco_dir}/bbnorm"
-trinity_norm_busco_dir="${busco_dir}/trinity"
+bbnorm_busco_dir="${result_base}/06_busco/bbnorm"
+trinity_norm_busco_dir="${result_base}/06_busco/trinity"
 mkdir -p "$bbnorm_busco_dir"
 mkdir -p "$trinity_norm_busco_dir"
 
 # Define separate BUSCO log directories
-bbnorm_busco_logs="${busco_logs}/bbnorm"
-trinity_norm_busco_logs="${busco_logs}/trinity"
+bbnorm_busco_logs="${logs_base}/06_busco/bbnorm"
+trinity_norm_busco_logs="${logs_base}/06_busco/trinity"
 mkdir -p "$bbnorm_busco_logs"
 mkdir -p "$trinity_norm_busco_logs"
 
@@ -354,7 +392,7 @@ else
 fi
 
 echo "All jobs submitted. Pipeline will run with the following job IDs:"
-echo "  Trimming: ${trim_job_ids[*]}"
+echo "  Trimming: $trim_dependencies"
 echo "  Merging: $merge_r1_job_id, $merge_r2_job_id"
 echo "  Pair checking: $check_pairs_job_id"
 echo "  BBNorm normalization: $bbnorm_job_id"
