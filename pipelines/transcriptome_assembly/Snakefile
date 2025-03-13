@@ -127,12 +127,14 @@ rule normalize_trinity:
 
 rule assemble:
     input:
-        r1 = f"{ta_config['output_dir']}/04_normalized/{{norm}}/norm_R1.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/04_normalized/{{norm}}/norm_R2.fastq.gz"
+        r1 = "results/transcriptome_assembly/04_normalized/{norm}/norm_R1.fastq.gz",
+        r2 = "results/transcriptome_assembly/04_normalized/{norm}/norm_R2.fastq.gz"
     output:
-        fasta = f"{ta_config['output_dir']}/05_assembly/{{norm}}/transcripts.fasta"
+        fasta = "results/transcriptome_assembly/05_assembly/{norm}/transcripts.fasta"
     log:
-        f"{ta_config['log_dir']}/05_assembly/{{norm}}/assembly.log"
+        "logs/transcriptome_assembly/05_assembly/{norm}/assembly.log"
+    params:
+        output_dir = "results/transcriptome_assembly/05_assembly/{norm}"
     conda:
         ta_config["conda_env"]
     resources:
@@ -142,17 +144,19 @@ rule assemble:
         mem = slurm_config["transcriptome"]["assembly"]["mem"]
     shell:
         """
-        rnaspades.py --rna -1 {input.r1} -2 {input.r2} -o {ta_config['output_dir']}/05_assembly/{wildcards.norm} \
+        rnaspades.py --rna -1 {input.r1} -2 {input.r2} -o {params.output_dir} \
                      -t {resources.cpus} -m {resources.mem} 2>> {log}
         """
 
 rule busco:
     input:
-        f"{ta_config['output_dir']}/05_assembly/{{norm}}/transcripts.fasta"
+        "results/transcriptome_assembly/05_assembly/{norm}/transcripts.fasta"
     output:
-        f"{ta_config['output_dir']}/06_busco/{{norm}}/run_diptera_odb10/short_summary.txt"
+        "results/transcriptome_assembly/06_busco/{norm}/run_diptera_odb10/short_summary.txt"
     log:
-        f"{ta_config['log_dir']}/06_busco/{{norm}}/busco.log"
+        "logs/transcriptome_assembly/06_busco/{norm}/busco.log"
+    params:
+        output_dir = "results/transcriptome_assembly/06_busco"
     conda:
         ta_config["conda_env"]
     resources:
@@ -163,5 +167,5 @@ rule busco:
     shell:
         """
         busco -i {input} -o {wildcards.norm} -l diptera_odb10 -m transcriptome \
-              -c {resources.cpus} --out_path {ta_config['output_dir']}/06_busco 2>> {log}
+              -c {resources.cpus} --out_path {params.output_dir} 2>> {log}
         """

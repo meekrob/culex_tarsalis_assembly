@@ -47,12 +47,12 @@ config["transcriptome_assembly"]["samples"] = SAMPLES
 rule all:
     input:
         # Transcriptome Assembly targets
-        expand("{results_dir}/transcriptome_assembly/06_busco/{norm}/run_diptera_odb10/short_summary.txt",
-               results_dir=config["results_dir"], norm=["bbnorm", "trinity"]),
+        expand("results/transcriptome_assembly/06_busco/{norm}/run_diptera_odb10/short_summary.txt",
+               norm=["bbnorm", "trinity"]),
         # Maker Annotator target
-        f"{config['maker_annotator']['output_dir']}/braker/augustus.hints.gff3",
+        "results/maker_annotator/braker/augustus.hints.gff3",
         # Repeat Annotator target
-        f"{config['repeat_annotator']['output_dir']}/{os.path.basename(config['repeat_annotator']['genome_dir'])}.masked"
+        "results/repeat_annotator/{}.masked".format(os.path.basename(config['repeat_annotator']['genome_dir']))
 
 # Include subworkflows
 include: "pipelines/transcriptome_assembly/Snakefile"

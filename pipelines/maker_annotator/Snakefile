@@ -8,17 +8,20 @@ rule braker:
         bam = ma_config["bam_file"],
         sif = ma_config["sif_path"]
     output:
-        gff3 = f"{ma_config['output_dir']}/braker/augustus.hints.gff3"
+        gff3 = "results/maker_annotator/braker/augustus.hints.gff3"
     log:
-        f"{ma_config['log_dir']}/braker.log"
+        "logs/maker_annotator/braker.log"
     resources:
         partition = slurm_config["default"]["partition"],
         time = slurm_config["maker"]["braker"]["time"],
         cpus = slurm_config["maker"]["braker"]["cpus"],
         mem = slurm_config["maker"]["braker"]["mem"]
+    params:
+        species_name = ma_config['species_name'],
+        output_dir = "results/maker_annotator/braker"
     shell:
         """
         singularity exec {input.sif} braker.pl --genome={input.genome} --bam={input.bam} \
-            --species={ma_config['species_name']} --cores={resources.cpus} \
-            --workingdir={ma_config['output_dir']}/braker 2>> {log}
+            --species={params.species_name} --cores={resources.cpus} \
+            --workingdir={params.output_dir} 2>> {log}
         """

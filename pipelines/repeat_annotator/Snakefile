@@ -7,9 +7,11 @@ rule repeatmasker:
         genome = lambda wc: f"{ra_config['genome_dir']}/{os.listdir(ra_config['genome_dir'])[0]}",
         repeat_lib = ra_config["repeat_lib"]
     output:
-        masked = f"{ra_config['output_dir']}/{os.path.basename(ra_config['genome_dir'])}.masked"
+        masked = "results/repeat_annotator/{}.masked".format(os.path.basename(ra_config['genome_dir']))
     log:
-        f"{ra_config['log_dir']}/repeatmasker.log"
+        "logs/repeat_annotator/repeatmasker.log"
+    params:
+        output_dir = "results/repeat_annotator"
     conda:
         ra_config["conda_env"]
     resources:
@@ -20,5 +22,5 @@ rule repeatmasker:
     shell:
         """
         RepeatMasker -s -lib {input.repeat_lib} {input.genome} -pa {resources.cpus} \
-                     -dir {ra_config['output_dir']} 2>> {log}
+                     -dir {params.output_dir} 2>> {log}
         """
