@@ -4,15 +4,21 @@ slurm_config = config["slurm"]
 
 rule trim_reads:
     input:
-        r1 = lambda wc: f"{ta_config['raw_reads_dir']}/{wc.sample}_R1.fastq.gz",
-        r2 = lambda wc: f"{ta_config['raw_reads_dir']}/{wc.sample}_R2.fastq.gz"
+        r1 = "{raw_reads_dir}/{sample}_R1.fastq.gz",
+        r2 = "{raw_reads_dir}/{sample}_R2.fastq.gz"
     output:
-        r1 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R1_trimmed.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R2_trimmed.fastq.gz",
-        html = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.html",
-        json = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.json"
+        r1 = "{output_dir}/01_trimmed/{sample}_R1_trimmed.fastq.gz",
+        r2 = "{output_dir}/01_trimmed/{sample}_R2_trimmed.fastq.gz",
+        html = "{output_dir}/01_trimmed/reports/{sample}_fastp.html",
+        json = "{output_dir}/01_trimmed/reports/{sample}_fastp.json"
     log:
-        f"{ta_config['log_dir']}/01_trimming/{{sample}}_trim.log"
+        "{log_dir}/01_trimming/{sample}_trim.log"
+    wildcard_constraints:
+        sample = "[^/]+"
+    params:
+        raw_reads_dir = ta_config['raw_reads_dir'],
+        output_dir = ta_config['output_dir'],
+        log_dir = ta_config['log_dir']
     conda:
         ta_config["conda_env"]
     resources:
@@ -22,7 +28,9 @@ rule trim_reads:
         mem = slurm_config["transcriptome"]["trimming"]["mem"]
     shell:
         """
-        fastp -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2} \
+        fastp -i {params.raw_reads_dir}/{wildcards.sample}_R1.fastq.gz \
+              -I {params.raw_reads_dir}/{wildcards.sample}_R2.fastq.gz \
+              -o {output.r1} -O {output.r2} \
               --html {output.html} --json {output.json} \
               --detect_adapter_for_pe --dedup -w {resources.cpus} -q 20 \
               --compression=6 2>> {log}
