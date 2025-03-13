@@ -5,8 +5,12 @@
 # This script identifies input files, sets up directories, and manages job dependencies
 
 #SBATCH --job-name=transcriptome
+#SBATCH --partition=day-long-cpu
 #SBATCH --output=transcriptome_%j.out
 #SBATCH --error=transcriptome_%j.err
+#SBATCH --time=24:00:00
+#SBATCH --mem=8G
+#SBATCH --cpus-per-task=1
 
 # Get start time for timing
 start_time=$(date +%s)
@@ -160,4 +164,142 @@ if [[ ! -d "$SCRIPT_DIR" ]]; then
     exit 1
 fi
 
-# Rest of script continues here
+# Process paired files and submit trimming jobs
+echo "Processing paired read files..."
+sample_count=0
+trim_dependencies=""
+
+# Write sample metadata to CSV for downstream
+metadata_file="${result_base}/sample_metadata.csv"
+echo "sample,r1_file,r2_file,trimmed_r1,trimmed_r2" > "$metadata_file"
+
+# Process only a subset for testing if in debug mode
+max_samples=1000
+if [[ "$debug_mode" == true ]]; then
+    max_samples=2
+    echo "DEBUG MODE: Processing only $max_samples samples"
+fi
+
+# Iterate through R1 files and find matching R2 files
+for sample in "${!r1_files[@]}"; do
+    r1="${r1_files[$sample]}"
+    
+    if [[ -n "${r2_files[$sample]}" ]]; then
+        r2="${r2_files[$sample]}"
+        
+        if [[ $sample_count -lt $max_samples ]]; then
+            echo "Processing sample pair: $sample"
+            echo "  R1: $r1"
+            echo "  R2: $r2"
+            
+            # Calculate output filenames for trimming
+            trimmed_r1="${result_base}/trimmed/${sample}_R1_trimmed.fastq.gz"
+            trimmed_r2="${result_base}/trimmed/${sample}_R2_trimmed.fastq.gz"
+            
+            # Create trimmed directory
+            mkdir -p "${result_base}/trimmed"
+            
+            # Add to metadata
+            echo "$sample,$r1,$r2,$trimmed_r1,$trimmed_r2" >> "$metadata_file"
+            
+            # Add to file lists
+            echo "$r1" >> "$r1_list"
+            echo "$r2" >> "$r2_list"
+            echo "$trimmed_r1" >> "$trimmed_r1_list" 
+            echo "$trimmed_r2" >> "$trimmed_r2_list"
+            
+            # Submit trimming job
+            trim_log="${logs_base}/trim_${sample}.log"
+            
+            trim_job_id=$(sbatch --parsable \
+                --job-name="trim_${sample}" \
+                --output="${logs_base}/trim_${sample}_%j.out" \
+                --error="${logs_base}/trim_${sample}_%j.err" \
+                "${SCRIPT_DIR}/01_trim.sh" "$r1" "$r2" "$trimmed_r1" "$trimmed_r2" "$sample")
+            
+            echo "Submitted trimming job for $sample: $trim_job_id"
+            
+            # Add to dependencies
+            if [[ -z "$trim_dependencies" ]]; then
+                trim_dependencies="afterok:$trim_job_id"
+            else
+                trim_dependencies="$trim_dependencies:$trim_job_id"
+            fi
+            
+            ((sample_count++))
+        fi
+    else
+        echo "Warning: No matching R2 file found for sample $sample (R1: $r1)"
+        echo "This sample will be skipped"
+    fi
+done
+
+echo "Processing $sample_count paired samples"
+
+if [[ $sample_count -eq 0 ]]; then
+    echo "Error: No valid sample pairs found. Exiting."
+    exit 1
+fi
+
+# Submit merge job
+echo "Submitting merge job..."
+
+merge_job_id=$(sbatch --parsable \
+    --job-name="merge" \
+    --dependency="$trim_dependencies" \
+    --output="${logs_base}/merge_%j.out" \
+    --error="${logs_base}/merge_%j.err" \
+    "${SCRIPT_DIR}/02_merge.sh" "$trimmed_r1_list" "$trimmed_r2_list" "${result_base}/merged_reads_R1.fastq.gz" "${result_base}/merged_reads_R2.fastq.gz")
+
+echo "Submitted merge job: $merge_job_id"
+
+# Submit normalization job
+echo "Submitting normalization job..."
+
+norm_job_id=$(sbatch --parsable \
+    --job-name="normalize" \
+    --dependency="afterok:$merge_job_id" \
+    --output="${logs_base}/normalize_%j.out" \
+    --error="${logs_base}/normalize_%j.err" \
+    "${SCRIPT_DIR}/03_normalize.sh" "${result_base}/merged_reads_R1.fastq.gz" "${result_base}/merged_reads_R2.fastq.gz" "${result_base}/normalized_reads")
+
+echo "Submitted normalization job: $norm_job_id"  
+
+# Submit assembly job
+echo "Submitting assembly job..."
+
+assembly_job_id=$(sbatch --parsable \
+    --job-name="assembly" \
+    --dependency="afterok:$norm_job_id" \
+    --output="${logs_base}/assembly_%j.out" \
+    --error="${logs_base}/assembly_%j.err" \
+    "${SCRIPT_DIR}/04_assemble.sh" "${result_base}/normalized_reads" "${result_base}/assembly")
+
+echo "Submitted assembly job: $assembly_job_id"
+
+# Submit busco job
+echo "Submitting BUSCO job..."
+
+busco_job_id=$(sbatch --parsable \
+    --job-name="busco" \
+    --dependency="afterok:$assembly_job_id" \
+    --output="${logs_base}/busco_%j.out" \
+    --error="${logs_base}/busco_%j.err" \
+    "${SCRIPT_DIR}/06_busco.sh" "${result_base}/assembly/Trinity.fasta" "${result_base}/busco")
+
+echo "Submitted BUSCO job: $busco_job_id"
+
+# Print job summary
+echo "====== Job Summary ======"
+echo "Trimming jobs: $trim_dependencies"
+echo "Merge job: $merge_job_id"
+echo "Normalization job: $norm_job_id"
+echo "Assembly job: $assembly_job_id"
+echo "BUSCO job: $busco_job_id"
+echo "========================="
+
+# Calculate and print pipeline runtime
+end_time=$(date +%s)
+runtime=$((end_time - start_time))
+echo "Pipeline setup completed in $runtime seconds"
+echo "Jobs are now running. Check job status with 'squeue -u $USER'"
