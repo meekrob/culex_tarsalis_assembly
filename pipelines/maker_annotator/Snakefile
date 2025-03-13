@@ -4,9 +4,9 @@ slurm_config = config["slurm"]
 
 rule braker:
     input:
-        genome = lambda wc: os.path.join(config["data_dir"], "genome", os.listdir(os.path.join(config["data_dir"], "genome"))[0]) if os.path.exists(os.path.join(config["data_dir"], "genome")) else "",
-        bam = config["maker_annotator"]["bam_file"],
-        sif = config["maker_annotator"]["sif_path"]
+        genome = lambda wc: os.path.join("data", "genome", os.listdir(os.path.join("data", "genome"))[0]) if os.path.exists(os.path.join("data", "genome")) else "",
+        bam = lambda wc: os.path.join("data", "transcriptome.bam"),
+        sif = lambda wc: "pipelines/maker_annotator/braker.sif"
     output:
         gff3 = "results/maker_annotator/braker/augustus.hints.gff3"
     log:

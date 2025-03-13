@@ -52,7 +52,7 @@ rule all:
         # Maker Annotator target
         "results/maker_annotator/braker/augustus.hints.gff3",
         # Repeat Annotator target
-        "results/repeat_annotator/{}.masked".format(os.path.basename(config['repeat_annotator']['genome_dir']))
+        "results/repeat_annotator/genome.masked"
 
 # Include subworkflows
 include: "pipelines/transcriptome_assembly/Snakefile"
