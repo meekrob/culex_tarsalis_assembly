@@ -5,17 +5,30 @@
 # This script identifies input files, sets up directories, and manages job dependencies
 
 #SBATCH --job-name=transcriptome
-#SBATCH --output=./logs/transcriptome_assembly/main_%j.out
-#SBATCH --error=./logs/transcriptome_assembly/main_%j.err
+#SBATCH --output=logs/transcriptome_assembly/main_%j.out
+#SBATCH --error=logs/transcriptome_assembly/main_%j.err
 
 # Get start time for timing
 start_time=$(date +%s)
 
-# Source conda and paths
+# Source conda
 source ~/.bashrc
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
-source "${REPO_ROOT}/config/paths.sh"
+
+# Detect repository root more reliably
+SCRIPT_PATH=$(realpath "$0")
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+REPO_ROOT=$(realpath "$SCRIPT_DIR/../../..")
+
+# Source paths file - use explicit path
+CONFIG_PATH="${REPO_ROOT}/config/paths.sh"
+if [[ -f "$CONFIG_PATH" ]]; then
+    source "$CONFIG_PATH"
+else
+    echo "ERROR: Cannot find paths config at $CONFIG_PATH"
+    echo "Current directory: $(pwd)"
+    echo "Script path: $SCRIPT_PATH"
+    exit 1
+fi
 
 # Parse command line arguments
 debug_mode=false
@@ -40,8 +53,11 @@ result_base="${2:-${RESULTS_DIR}/transcriptome_assembly}"
 logs_base="${LOGS_DIR}/transcriptome_assembly"
 temp_dir="${TEMP_DIR}/transcriptome_assembly"
 
-# Setup pipeline directories
-setup_pipeline_dirs "transcriptome_assembly"
+# Create directories manually instead of using function
+echo "Creating pipeline directories..."
+mkdir -p "${result_base}"
+mkdir -p "${logs_base}"
+mkdir -p "${temp_dir}"
 
 # Create step-specific subdirectories
 mkdir -p "${result_base}/01_trimmed"
@@ -64,26 +80,25 @@ mkdir -p "${logs_base}/05_assembly/trinity"
 mkdir -p "${logs_base}/06_busco/bbnorm"
 mkdir -p "${logs_base}/06_busco/trinity"
 
-mkdir -p "$temp_dir"
-
-# Define file lists for storing input/output files
-r1_list="${temp_dir}/r1_files.txt"
-r2_list="${temp_dir}/r2_files.txt"
-trimmed_r1_list="${temp_dir}/trimmed_r1_files.txt"
-trimmed_r2_list="${temp_dir}/trimmed_r2_files.txt"
-
 # Create summary file
 summary_file="${logs_base}/pipeline_summary.csv"
+touch "$summary_file"
 echo "Step,Sample,Metric,Value" > "$summary_file"
 
-# Display run info
-echo "====== Mosquito RNA-Seq Pipeline ======"
-echo "Data directory: $data_base"
-echo "Results directory: $result_base"
-echo "Logs directory: $logs_base"
-if [[ "$debug_mode" == true ]]; then
-    echo "Running in DEBUG mode - will skip steps with existing outputs"
+# Check disk space
+required_space=$((50 * 1024 * 1024)) # 50GB in KB
+available_space=$(df -k "$result_base" | tail -1 | awk '{print $4}')
+if [[ $available_space -lt $required_space ]]; then
+    echo "Error: Insufficient disk space ($available_space KB available, $required_space KB required)"
+    exit 1
 fi
+
+# Print pipeline info with explicit paths for debugging
+echo "====== Mosquito RNA-Seq Pipeline ======"
+echo "Repository root: $REPO_ROOT"
+echo "Data directory: $data_base"
+echo "Results directory: $result_base" 
+echo "Logs directory: $logs_base"
 echo "======================================"
 
 # Check if data directory exists
@@ -91,23 +106,19 @@ if [[ ! -d "$data_base" ]]; then
     echo "Data directory not found: $data_base"
     echo "Please make sure this directory exists and contains read files."
     echo "Directory structure from repo root:"
-    find "$REPO_ROOT" -type d -maxdepth 3 | sort
+    ls -la $REPO_ROOT
     exit 1
 fi
 
-# Check available disk space (requiring at least 50GB)
-required_space=$((50 * 1024 * 1024)) # 50GB in KB
-available_space=$(df -k "$result_base" | tail -1 | awk '{print $4}')
-if [[ $available_space -lt $required_space ]]; then
-    echo "Error: Insufficient disk space in results directory"
-    echo "Available: $(($available_space / 1024 / 1024)) GB"
-    echo "Required: $((required_space / 1024 / 1024)) GB"
-    exit 1
-fi
-
-# IMPROVED FILE PAIRING: Use associative arrays for explicit sample matching
-echo "Finding and pairing input files..."
+# Find R1 and R2 files and pair them by sample name
 declare -A r1_files r2_files
+echo "Scanning for read files in $data_base ..."
+
+# Define file lists for storing input/output files
+r1_list="${temp_dir}/r1_files.txt"
+r2_list="${temp_dir}/r2_files.txt"
+trimmed_r1_list="${temp_dir}/trimmed_r1_files.txt"
+trimmed_r2_list="${temp_dir}/trimmed_r2_files.txt"
 
 # Initialize file lists
 > "$r1_list"
@@ -115,45 +126,32 @@ declare -A r1_files r2_files
 > "$trimmed_r1_list"
 > "$trimmed_r2_list"
 
-# Find all R1 and R2 files and organize by sample name
-for file in "$data_base"/*; do
-    # Skip empty or non-regular files
-    if [[ ! -s "$file" || ! -f "$file" ]]; then
-        continue
-    fi
-    
-    basename=$(basename "$file")
-    
-    # Match R1 files
-    if [[ "$file" =~ .*R1.* ]]; then
-        # Extract sample name by removing R1 and file extension
-        sample=$(echo "$basename" | sed -E 's/(.*)_?R1.*/\1/')
+# Find and store R1 files
+for file in "$data_base"/*R1*.fastq.gz "$data_base"/*_1.fastq.gz; do
+    if [[ -s "$file" ]]; then
+        # Extract sample name from filename
+        sample=$(basename "$file" | sed -E 's/_R1.*|_1\.fastq\.gz//')
         r1_files["$sample"]="$file"
-        echo "Found R1 for sample $sample: $file"
-    fi
-    
-    # Match R2 files
-    if [[ "$file" =~ .*R2.* ]]; then
-        # Extract sample name by removing R2 and file extension
-        sample=$(echo "$basename" | sed -E 's/(.*)_?R2.*/\1/')
-        r2_files["$sample"]="$file"
-        echo "Found R2 for sample $sample: $file"
+        echo "Found R1 file for sample $sample: $file"
     fi
 done
 
-# Check if we found any files
-if [[ ${#r1_files[@]} -eq 0 ]]; then
-    echo "Error: No R1 files found in $data_base"
-    echo "Looking for files with pattern *R1* in their names"
-    echo "Available files in directory:"
-    ls -la "$data_base"
-    exit 1
-fi
+# Find and store R2 files
+for file in "$data_base"/*R2*.fastq.gz "$data_base"/*_2.fastq.gz; do
+    if [[ -s "$file" ]]; then
+        # Extract sample name from filename
+        sample=$(basename "$file" | sed -E 's/_R2.*|_2\.fastq\.gz//')
+        r2_files["$sample"]="$file"
+        echo "Found R2 file for sample $sample: $file"
+    fi
+done
 
 echo "Found ${#r1_files[@]} R1 files and ${#r2_files[@]} R2 files"
 
 # Ensure all R1 files have matching R2 files
+trim_dependencies=""
 sample_count=0
+
 for sample in "${!r1_files[@]}"; do
     r1="${r1_files[$sample]}"
     
