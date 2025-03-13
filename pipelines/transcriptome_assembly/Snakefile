@@ -4,15 +4,15 @@ slurm_config = config["slurm"]
 
 rule trim_reads:
     input:
-        r1 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1.fastq.gz",
-        r2 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2.fastq.gz"
+        r1 = ta_config['raw_reads_dir'] + "/{sample}_R1.fastq.gz",
+        r2 = ta_config['raw_reads_dir'] + "/{sample}_R2.fastq.gz"
     output:
-        r1 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R1_trimmed.fastq.gz",
-        r2 = f"{ta_config['output_dir']}/01_trimmed/{{sample}}_R2_trimmed.fastq.gz",
-        html = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.html",
-        json = f"{ta_config['output_dir']}/01_trimmed/reports/{{sample}}_fastp.json"
+        r1 = ta_config['output_dir'] + "/01_trimmed/{sample}_R1_trimmed.fastq.gz",
+        r2 = ta_config['output_dir'] + "/01_trimmed/{sample}_R2_trimmed.fastq.gz",
+        html = ta_config['output_dir'] + "/01_trimmed/reports/{sample}_fastp.html",
+        json = ta_config['output_dir'] + "/01_trimmed/reports/{sample}_fastp.json"
     log:
-        f"{ta_config['log_dir']}/01_trimming/{{sample}}_trim.log"
+        ta_config['log_dir'] + "/01_trimming/{sample}_trim.log"
     conda:
         ta_config["conda_env"]
     resources:
