@@ -36,10 +36,11 @@ config = resolve_path_templates(config)
 SAMPLES = []
 if not config["transcriptome_assembly"]["samples"]:
     raw_reads_dir = config["transcriptome_assembly"]["raw_reads_dir"]
-    for f in os.listdir(raw_reads_dir):
-        if f.endswith(("R1.fastq.gz", "_1.fastq.gz")):
-            sample = f.replace("_R1.fastq.gz", "").replace("_1.fastq.gz", "")
-            SAMPLES.append(sample)
+    if os.path.exists(raw_reads_dir):
+        for f in os.listdir(raw_reads_dir):
+            if f.endswith(("R1.fastq.gz", "_1.fastq.gz")):
+                sample = f.replace("_R1.fastq.gz", "").replace("_1.fastq.gz", "")
+                SAMPLES.append(sample)
 config["transcriptome_assembly"]["samples"] = SAMPLES
 
 # Define pipeline targets
