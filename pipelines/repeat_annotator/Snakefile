@@ -4,10 +4,10 @@ slurm_config = config["slurm"]
 
 rule repeatmasker:
     input:
-        genome = lambda wc: f"{ra_config['genome_dir']}/{os.listdir(ra_config['genome_dir'])[0]}",
-        repeat_lib = ra_config["repeat_lib"]
+        genome = lambda wc: os.path.join(config["data_dir"], "genome", os.listdir(os.path.join(config["data_dir"], "genome"))[0]) if os.path.exists(os.path.join(config["data_dir"], "genome")) else "",
+        repeat_lib = config["repeat_annotator"]["repeat_lib"]
     output:
-        masked = "results/repeat_annotator/{}.masked".format(os.path.basename(ra_config['genome_dir']))
+        masked = "results/repeat_annotator/{}.masked".format(os.path.basename(config["repeat_annotator"]["genome_dir"]))
     log:
         "logs/repeat_annotator/repeatmasker.log"
     params:
