@@ -1,7 +1,38 @@
 configfile: "config/config.yaml"
 
-# Dynamically detect samples for transcriptome assembly
+# Resolve path variables in config
 import os
+from string import Formatter
+
+def resolve_path_templates(config_dict, root_vars=None):
+    if root_vars is None:
+        root_vars = {"repo_root": "."}
+    
+    resolved = {}
+    for key, value in config_dict.items():
+        if isinstance(value, dict):
+            resolved[key] = resolve_path_templates(value, root_vars)
+        elif isinstance(value, str):
+            try:
+                # Extract variable names from the string
+                var_names = [fn for _, fn, _, _ in Formatter().parse(value) if fn is not None]
+                # Resolve variables recursively
+                if var_names:
+                    template_vars = {**root_vars, **resolved}
+                    resolved[key] = value.format(**template_vars)
+                else:
+                    resolved[key] = value
+            except KeyError:
+                # If a key isn't available yet, keep the template string
+                resolved[key] = value
+        else:
+            resolved[key] = value
+    return resolved
+
+# Resolve all paths in the config
+config = resolve_path_templates(config)
+
+# Dynamically detect samples for transcriptome assembly
 SAMPLES = []
 if not config["transcriptome_assembly"]["samples"]:
     raw_reads_dir = config["transcriptome_assembly"]["raw_reads_dir"]
