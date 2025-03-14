@@ -17,3 +17,5 @@
 *.sif
 logs/
 temp/
+.Rproj.user
+*.Rproj
