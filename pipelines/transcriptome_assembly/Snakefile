@@ -107,7 +107,7 @@ rule normalize_trinity:
     log:
         "logs/transcriptome_assembly/04_normalization/trinity/trinity_norm.log"
     params:
-        temp_dir = ta_config['temp_dir']
+        temp_dir = lambda wildcards: ta_config['temp_dir']
     conda:
         ta_config["trinity_env"]
     resources:
