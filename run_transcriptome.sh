@@ -4,10 +4,43 @@
 echo "=== Current config.yaml ==="
 cat config/config.yaml
 
-# Create a temporary configuration with fixed paths
+# Now let's get all samples
+echo "=== Detecting samples ==="
+ALL_SAMPLES=$(python -c "
+import os
+SAMPLES = []
+raw_reads_dir = 'data/raw_reads'
+if os.path.exists(raw_reads_dir):
+    for f in os.listdir(raw_reads_dir):
+        if 'R1' in f and f.endswith('.fastq.gz'):
+            if '_R1_001.fastq.gz' in f:
+                sample = f.replace('_R1_001.fastq.gz', '')
+            elif '_R1.fastq.gz' in f:
+                sample = f.replace('_R1.fastq.gz', '')
+            else:
+                continue
+            SAMPLES.append(sample)
+    print(' '.join(SAMPLES))
+else:
+    print('')
+")
+
+# Get a subset for testing
+TEST_SAMPLES=$(echo $ALL_SAMPLES | tr ' ' '\n' | head -5 | tr '\n' ' ')
+echo "Using test samples: $TEST_SAMPLES"
+
+# Create a temporary configuration with fixed paths AND specific samples
 TEMP_CONFIG="config/config_fixed.yaml"
 
-# Fix the raw_reads_dir in the config
+# Create JSON-formatted samples array
+SAMPLES_JSON="["
+for sample in $TEST_SAMPLES; do
+  SAMPLES_JSON+="\"$sample\", "
+done
+SAMPLES_JSON=${SAMPLES_JSON%, }  # Remove trailing comma
+SAMPLES_JSON+="]"
+
+# Fix the config with specific samples
 cat > $TEMP_CONFIG << EOF
 slurm:
   default:
@@ -55,7 +88,7 @@ slurm:
 
 transcriptome_assembly:
   raw_reads_dir: "data/raw_reads"
-  samples: []
+  samples: $SAMPLES_JSON
   conda_env: "cellSquito"
   trinity_env: "trinity"
   temp_dir: "/tmp"
@@ -72,53 +105,28 @@ EOF
 
 echo "=== Fixed config created at $TEMP_CONFIG ==="
 
-# Now let's print the samples we detect
-echo "=== Detecting samples ==="
-SAMPLES=$(python -c "
-import os
-SAMPLES = []
-raw_reads_dir = 'data/raw_reads'
-if os.path.exists(raw_reads_dir):
-    for f in os.listdir(raw_reads_dir):
-        if 'R1' in f and f.endswith('.fastq.gz'):
-            if '_R1_001.fastq.gz' in f:
-                sample = f.replace('_R1_001.fastq.gz', '')
-            elif '_R1.fastq.gz' in f:
-                sample = f.replace('_R1.fastq.gz', '')
-            else:
-                continue
-            SAMPLES.append(sample)
-    print(' '.join(SAMPLES[:5]))  # Just use 5 samples for testing
-else:
-    print('Error: Directory {raw_reads_dir} does not exist!')
-")
-
-echo "Using samples: $SAMPLES"
-
-# Create a list of trimmed outputs based on detected samples
-TRIM_TARGETS=""
-for sample in $SAMPLES; do
-  TRIM_TARGETS="$TRIM_TARGETS results/transcriptome_assembly/01_trimmed/${sample}_R1_trimmed.fastq.gz"
-done
-
-echo "=== PHASE 1: Running trimming for samples ==="
-# Run the trimming phase first
+# First do a dry run to see what will happen
+echo "=== Dry run to check workflow ==="
 snakemake \
   --configfile $TEMP_CONFIG \
   --executor slurm \
+  --scheduler greedy \
   --jobs 15 \
   --use-conda \
   --latency-wait 60 \
   --default-resources partition=day-long-cpu time=24:00:00 mem=64G cpus=16 \
   --slurm-logdir logs/ \
   --slurm-no-account \
-  $TRIM_TARGETS
+  --dryrun \
+  results/transcriptome_assembly/06_busco/bbnorm/run_diptera_odb10/short_summary.txt \
+  results/transcriptome_assembly/06_busco/trinity/run_diptera_odb10/short_summary.txt
 
-echo "=== PHASE 2: Running the rest of the workflow ==="
-# Then run the rest of the workflow
+# Run the workflow if the dry run looks good
+echo "=== Running workflow with fixed config ==="
 snakemake \
   --configfile $TEMP_CONFIG \
   --executor slurm \
+  --scheduler greedy \
   --jobs 15 \
   --use-conda \
   --latency-wait 60 \
