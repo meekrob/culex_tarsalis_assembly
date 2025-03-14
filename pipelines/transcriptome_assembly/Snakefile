@@ -2,36 +2,35 @@ import os
 
 configfile: "config/config.yaml"
 ta_config = config["transcriptome_assembly"]
-slurm_config = config["slurm"]
+slurm_config = config["slurm"]["transcriptome"]
+
+# Get the raw reads directory from config
+raw_reads_dir = config["transcriptome_assembly"]["raw_reads_dir"]
 
 rule trim_reads:
     input:
-        r1 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1_001.fastq.gz" if os.path.exists(f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1_001.fastq.gz") else f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1.fastq.gz",
-        r2 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2_001.fastq.gz" if os.path.exists(f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2_001.fastq.gz") else f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2.fastq.gz"
+        r1 = lambda wildcards: os.path.join(raw_reads_dir, f"{wildcards.sample}_R1_001.fastq.gz") if os.path.exists(os.path.join(raw_reads_dir, f"{wildcards.sample}_R1_001.fastq.gz")) else os.path.join(raw_reads_dir, f"{wildcards.sample}_R1.fastq.gz"),
+        r2 = lambda wildcards: os.path.join(raw_reads_dir, f"{wildcards.sample}_R2_001.fastq.gz") if os.path.exists(os.path.join(raw_reads_dir, f"{wildcards.sample}_R2_001.fastq.gz")) else os.path.join(raw_reads_dir, f"{wildcards.sample}_R2.fastq.gz")
     output:
         r1 = "results/transcriptome_assembly/01_trimmed/{sample}_R1_trimmed.fastq.gz",
         r2 = "results/transcriptome_assembly/01_trimmed/{sample}_R2_trimmed.fastq.gz",
         html = "results/transcriptome_assembly/01_trimmed/reports/{sample}_fastp.html",
         json = "results/transcriptome_assembly/01_trimmed/reports/{sample}_fastp.json"
     log:
-        "logs/transcriptome_assembly/01_trimming/{sample}_trim.log"
-    params:
-        raw_reads_dir = ta_config['raw_reads_dir']
+        "logs/transcriptome_assembly/01_trimming/{sample}.log"
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["trimming"]["time"],
-        cpus = slurm_config["transcriptome"]["trimming"]["cpus"],
-        mem = slurm_config["transcriptome"]["trimming"]["mem"]
+        partition = slurm_config["trimming"]["partition"] if "partition" in slurm_config["trimming"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["trimming"]["time"],
+        cpus = slurm_config["trimming"]["cpus"],
+        mem = slurm_config["trimming"]["mem"]
     shell:
         """
-        fastp -i {input.r1} \
-              -I {input.r2} \
-              -o {output.r1} -O {output.r2} \
-              --html {output.html} --json {output.json} \
-              --detect_adapter_for_pe --dedup -w {resources.cpus} -q 20 \
-              --compression=6 2>> {log}
+        trimmomatic PE -threads {resources.cpus} {input.r1} {input.r2} \
+            {output.r1} /dev/null {output.r2} /dev/null \
+            ILLUMINACLIP:adapters/TruSeq3-PE.fa:2:30:10 \
+            LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 2> {log}
         """
 
 rule merge_reads:
@@ -46,10 +45,10 @@ rule merge_reads:
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["merge"]["time"],
-        cpus = slurm_config["transcriptome"]["merge"]["cpus"],
-        mem = slurm_config["transcriptome"]["merge"]["mem"]
+        partition = slurm_config["merge"]["partition"] if "partition" in slurm_config["merge"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["merge"]["time"],
+        cpus = slurm_config["merge"]["cpus"],
+        mem = slurm_config["merge"]["mem"]
     shell:
         """
         pigz -dc {input.r1} | pigz -c > {output.r1} 2>> {log}
@@ -68,10 +67,10 @@ rule check_pairs:
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["pair_check"]["time"],
-        cpus = slurm_config["transcriptome"]["pair_check"]["cpus"],
-        mem = slurm_config["transcriptome"]["pair_check"]["mem"]
+        partition = slurm_config["pair_check"]["partition"] if "partition" in slurm_config["pair_check"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["pair_check"]["time"],
+        cpus = slurm_config["pair_check"]["cpus"],
+        mem = slurm_config["pair_check"]["mem"]
     shell:
         """
         bbmap/repair.sh in1={input.r1} in2={input.r2} out1={output.r1} out2={output.r2} 2>> {log}
@@ -89,10 +88,10 @@ rule normalize_bbnorm:
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["bbnorm"]["time"],
-        cpus = slurm_config["transcriptome"]["bbnorm"]["cpus"],
-        mem = slurm_config["transcriptome"]["bbnorm"]["mem"]
+        partition = slurm_config["bbnorm"]["partition"] if "partition" in slurm_config["bbnorm"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["bbnorm"]["time"],
+        cpus = slurm_config["bbnorm"]["cpus"],
+        mem = slurm_config["bbnorm"]["mem"]
     shell:
         """
         bbnorm.sh in={input.r1} in2={input.r2} out={output.r1} out2={output.r2} \
@@ -113,10 +112,10 @@ rule normalize_trinity:
     conda:
         ta_config["trinity_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["trinity_norm"]["time"],
-        cpus = slurm_config["transcriptome"]["trinity_norm"]["cpus"],
-        mem = slurm_config["transcriptome"]["trinity_norm"]["mem"]
+        partition = slurm_config["trinity_norm"]["partition"] if "partition" in slurm_config["trinity_norm"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["trinity_norm"]["time"],
+        cpus = slurm_config["trinity_norm"]["cpus"],
+        mem = slurm_config["trinity_norm"]["mem"]
     shell:
         """
         Trinity --seqType fq --JM {resources.mem} --max_cov 100 \
@@ -140,10 +139,10 @@ rule assemble:
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["transcriptome"]["assembly"]["partition"],
-        time = slurm_config["transcriptome"]["assembly"]["time"],
-        cpus = slurm_config["transcriptome"]["assembly"]["cpus"],
-        mem = slurm_config["transcriptome"]["assembly"]["mem"]
+        partition = slurm_config["assembly"]["partition"] if "partition" in slurm_config["assembly"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["assembly"]["time"],
+        cpus = slurm_config["assembly"]["cpus"],
+        mem = slurm_config["assembly"]["mem"]
     shell:
         """
         rnaspades.py --rna -1 {input.r1} -2 {input.r2} -o {params.output_dir} \
@@ -162,10 +161,10 @@ rule busco:
     conda:
         ta_config["conda_env"]
     resources:
-        partition = slurm_config["default"]["partition"],
-        time = slurm_config["transcriptome"]["busco"]["time"],
-        cpus = slurm_config["transcriptome"]["busco"]["cpus"],
-        mem = slurm_config["transcriptome"]["busco"]["mem"]
+        partition = slurm_config["busco"]["partition"] if "partition" in slurm_config["busco"] else config["slurm"]["default"]["partition"],
+        time = slurm_config["busco"]["time"],
+        cpus = slurm_config["busco"]["cpus"],
+        mem = slurm_config["busco"]["mem"]
     shell:
         """
         busco -i {input} -o {wildcards.norm} -l diptera_odb10 -m transcriptome \

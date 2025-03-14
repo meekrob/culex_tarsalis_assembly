@@ -19,12 +19,12 @@ def resolve_path_templates(config_dict, root_vars=None):
                 # Resolve variables recursively
                 if var_names:
                     template_vars = {**root_vars, **resolved}
-                    resolved[key] = value.format(**template_vars)
-                else:
-                    resolved[key] = value
-            except KeyError:
-                # If a key isn't available yet, keep the template string
-                resolved[key] = value
+                    for var_name in var_names:
+                        if var_name in template_vars:
+                            value = value.replace("{" + var_name + "}", template_vars[var_name])
+            except Exception as e:
+                pass
+            resolved[key] = value
         else:
             resolved[key] = value
     return resolved

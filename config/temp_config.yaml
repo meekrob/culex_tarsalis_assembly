@@ -1,0 +1,112 @@
+data_dir: ./data
+logs_dir: ./logs
+maker_annotator:
+  bam_file: data/transcriptome.bam
+  genome_dir: data/genome
+  log_dir: logs/maker_annotator
+  output_dir: results/maker_annotator
+  sif_path: pipelines/maker_annotator/braker.sif
+  species_name: mosquito
+  temp_dir: temp/maker_annotator
+repeat_annotator:
+  conda_env: repeatmasker
+  genome_dir: data/genome
+  log_dir: logs/repeat_annotator
+  output_dir: results/repeat_annotator
+  repeat_lib: data/repeats/mosquito_repeat_lib.fasta
+  temp_dir: temp/repeat_annotator
+repo_root: .
+results_dir: ./results
+slurm:
+  default:
+    cpus: 16
+    mem: 64G
+    nodes: 1
+    partition: day-long-cpu
+    time: '24:00:00'
+  maker:
+    braker:
+      cpus: 16
+      mem: 64G
+      time: '24:00:00'
+  repeat:
+    repeatmasker:
+      cpus: 16
+      mem: 100G
+      time: '24:00:00'
+  transcriptome:
+    assembly:
+      cpus: 64
+      mem: 250G
+      partition: week-long-highmem
+      time: '168:00:00'
+    bbnorm:
+      cpus: 32
+      mem: 128G
+      time: '12:00:00'
+    busco:
+      cpus: 16
+      mem: 32G
+      time: '24:00:00'
+    merge:
+      cpus: 16
+      mem: 64G
+      time: '24:00:00'
+    pair_check:
+      cpus: 8
+      mem: 32G
+      time: '12:00:00'
+    trimming:
+      cpus: 4
+      mem: 8G
+      time: 01:00:00
+    trinity_norm:
+      cpus: 32
+      mem: 128G
+      time: '12:00:00'
+temp_dir: ./temp
+transcriptome_assembly:
+  conda_env: cellSquito
+  log_dir: logs/transcriptome_assembly
+  output_dir: results/transcriptome_assembly
+  raw_reads_dir: data/raw_reads
+  samples:
+  - 22_mock_C_S6_L003
+  - 30_mock_C_S18_L003
+  - Cxt-adult-48
+  - 30_WNV_C_S15_L003
+  - Cx-L4
+  - 30_WNV_B_S14_L003
+  - Cx-Adult-71
+  - Cx-adult
+  - 22_mock_B_S5_L003
+  - Cxt-adult-10
+  - Cx-r2
+  - Cx-Adult-41
+  - Cx-pupae
+  - 26_WNV_ABC_S7-9
+  - 22_mock_A_S4_L003
+  - 30_mock_B_S17_L003
+  - all
+  - Cx-Adult-61
+  - Cx-Adult-84
+  - Cx-allAdult
+  - 26_WNV_A_S7_L003
+  - 22_WNV_B_S2_L003
+  - Cx-Adult-54
+  - 26_mock_A_S10_L003
+  - 30_WNV_A_S13_L003
+  - Cxt-adult-45
+  - 30_WNV_ABC_S_L003
+  - 26_mock_B_S11_L003
+  - 30_mock_A_S16_L003
+  - 26_WNV_C_S9_L003
+  - 22_WNV_A_S1_L003
+  - 26_WNV_B_S8_L003
+  - 26_mock_C_S12_L003
+  - 22_WNV_C_S3_L003
+  - Cx-Adult
+  - Cxt-adult-45-2
+  - 22_WNV_ABC_S1-3
+  temp_dir: temp/transcriptome_assembly
+  trinity_env: trinity

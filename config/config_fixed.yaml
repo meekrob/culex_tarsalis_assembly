@@ -1,0 +1,59 @@
+slurm:
+  default:
+    partition: "day-long-cpu"
+  transcriptome:
+    trimming:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+    merge:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+    pair_check:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+    bbnorm:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+    trinity_norm:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+    assembly:
+      partition: "day-long-cpu"
+      time: "48:00:00"
+      cpus: 32
+      mem: "128G"
+    busco:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+  maker:
+    braker:
+      time: "72:00:00"
+      cpus: 32
+      mem: "128G"
+  repeat:
+    repeatmasker:
+      time: "24:00:00"
+      cpus: 16
+      mem: "64G"
+
+transcriptome_assembly:
+  raw_reads_dir: "data/raw_reads"
+  samples: ["22_mock_A_S4_L003", "22_mock_B_S5_L003", "22_mock_C_S6_L003", "22_WNV_ABC_S1-3", "22_WNV_A_S1_L003"]
+  conda_env: "cellSquito"
+  trinity_env: "trinity"
+  temp_dir: "/tmp"
+
+maker_annotator:
+  species_name: "culex_tarsalis"
+  conda_env: "braker"
+
+repeat_annotator:
+  genome_dir: "data/genome"
+  repeat_lib: "data/repeats/mosquito_repeat_lib.fasta"
+  conda_env: "repeatmasker"
