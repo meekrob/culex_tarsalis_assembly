@@ -1,8 +1,13 @@
 # convert fastp json output files to a csv, extracting scalar values on filtering stats
-import json,os
+import json,os,sys
 import pandas as pd
-fnames = [f for f in os.listdir(".") if f.endswith('.json') ] 
-          #["trimmed.Cx-Adult_R2.fastq.gz.json"]
+try:
+    dir_w_jsons=sys.argv[1]
+except:
+    print(f"Usage: {sys.argv[0]} dir_w_jsons")
+    sys.exit(0)
+
+fnames = [os.path.join(dir_w_jsons, f) for f in os.listdir(dir_w_jsons) if f.endswith('.json') ] 
 rows = []
 for fname in fnames:
     with open(fname) as fp:
