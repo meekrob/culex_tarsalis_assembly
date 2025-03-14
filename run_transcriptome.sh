@@ -74,7 +74,7 @@ echo "=== Fixed config created at $TEMP_CONFIG ==="
 
 # Now let's print the samples we detect
 echo "=== Detecting samples ==="
-python -c "
+SAMPLES=$(python -c "
 import os
 SAMPLES = []
 raw_reads_dir = 'data/raw_reads'
@@ -88,17 +88,34 @@ if os.path.exists(raw_reads_dir):
             else:
                 continue
             SAMPLES.append(sample)
-    print(f'Found {len(SAMPLES)} samples')
-    if SAMPLES:
-        print(f'First 5 samples: {SAMPLES[:5]}')
-    else:
-        print('No samples detected!')
+    print(' '.join(SAMPLES[:5]))  # Just use 5 samples for testing
 else:
-    print(f'Error: Directory {raw_reads_dir} does not exist!')
-"
+    print('Error: Directory {raw_reads_dir} does not exist!')
+")
 
-echo "=== Running workflow with fixed config ==="
-# Run with the fixed config
+echo "Using samples: $SAMPLES"
+
+# Create a list of trimmed outputs based on detected samples
+TRIM_TARGETS=""
+for sample in $SAMPLES; do
+  TRIM_TARGETS="$TRIM_TARGETS results/transcriptome_assembly/01_trimmed/${sample}_R1_trimmed.fastq.gz"
+done
+
+echo "=== PHASE 1: Running trimming for samples ==="
+# Run the trimming phase first
+snakemake \
+  --configfile $TEMP_CONFIG \
+  --executor slurm \
+  --jobs 15 \
+  --use-conda \
+  --latency-wait 60 \
+  --default-resources partition=day-long-cpu time=24:00:00 mem=64G cpus=16 \
+  --slurm-logdir logs/ \
+  --slurm-no-account \
+  $TRIM_TARGETS
+
+echo "=== PHASE 2: Running the rest of the workflow ==="
+# Then run the rest of the workflow
 snakemake \
   --configfile $TEMP_CONFIG \
   --executor slurm \
