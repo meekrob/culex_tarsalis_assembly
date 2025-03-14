@@ -1,0 +1,11 @@
+executor: slurm
+jobs: 15
+use-conda: true
+latency-wait: 60
+default-resources:
+  - partition=day-long-cpu
+  - time=24:00:00
+  - mem=64G
+  - cpus=16
+slurm-jobscript: "#!/bin/bash\n{exec_job}"
+slurm-submit-cmd: "sbatch -p {resources.partition} -t {resources.time} -c {resources.cpus} --mem={resources.mem} -o {log}.slurm.out -e {log}.slurm.err"
