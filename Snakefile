@@ -38,8 +38,13 @@ if not config["transcriptome_assembly"]["samples"]:
     raw_reads_dir = config["transcriptome_assembly"]["raw_reads_dir"]
     if os.path.exists(raw_reads_dir):
         for f in os.listdir(raw_reads_dir):
-            if f.endswith(("R1.fastq.gz", "_1.fastq.gz")):
-                sample = f.replace("_R1.fastq.gz", "").replace("_1.fastq.gz", "")
+            if "R1" in f and f.endswith(".fastq.gz"):
+                if "_R1_001.fastq.gz" in f:
+                    sample = f.replace("_R1_001.fastq.gz", "")
+                elif "_R1.fastq.gz" in f:
+                    sample = f.replace("_R1.fastq.gz", "")
+                else:
+                    continue
                 SAMPLES.append(sample)
 config["transcriptome_assembly"]["samples"] = SAMPLES
 

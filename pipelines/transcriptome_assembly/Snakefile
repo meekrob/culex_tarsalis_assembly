@@ -1,11 +1,13 @@
+import os
+
 configfile: "config/config.yaml"
 ta_config = config["transcriptome_assembly"]
 slurm_config = config["slurm"]
 
 rule trim_reads:
     input:
-        r1 = "{sample}_R1.fastq.gz",
-        r2 = "{sample}_R2.fastq.gz"
+        r1 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1_001.fastq.gz" if os.path.exists(f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1_001.fastq.gz") else f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R1.fastq.gz",
+        r2 = lambda wildcards: f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2_001.fastq.gz" if os.path.exists(f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2_001.fastq.gz") else f"{ta_config['raw_reads_dir']}/{wildcards.sample}_R2.fastq.gz"
     output:
         r1 = "results/transcriptome_assembly/01_trimmed/{sample}_R1_trimmed.fastq.gz",
         r2 = "results/transcriptome_assembly/01_trimmed/{sample}_R2_trimmed.fastq.gz",
@@ -24,8 +26,8 @@ rule trim_reads:
         mem = slurm_config["transcriptome"]["trimming"]["mem"]
     shell:
         """
-        fastp -i {params.raw_reads_dir}/{wildcards.sample}_R1.fastq.gz \
-              -I {params.raw_reads_dir}/{wildcards.sample}_R2.fastq.gz \
+        fastp -i {input.r1} \
+              -I {input.r2} \
               -o {output.r1} -O {output.r2} \
               --html {output.html} --json {output.json} \
               --detect_adapter_for_pe --dedup -w {resources.cpus} -q 20 \
