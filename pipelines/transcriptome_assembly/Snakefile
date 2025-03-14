@@ -65,8 +65,39 @@ rule merge_reads:
         mem = slurm_config["merge"]["mem"]
     shell:
         """
-        pigz -dc {input.r1} | pigz -c > {output.r1} 2>> {log}
-        pigz -dc {input.r2} | pigz -c > {output.r2} 2>> {log}
+        # Create output directory
+        mkdir -p $(dirname {output.r1})
+        
+        # Determine compression command based on available tools
+        if command -v pigz >/dev/null 2>&1; then
+            COMPRESS_CMD="pigz -p {resources.cpus}"
+            DECOMPRESS_CMD="pigz -dc -p {resources.cpus}"
+            echo "Using pigz for parallel compression/decompression" >> {log}
+        else
+            COMPRESS_CMD="gzip"
+            DECOMPRESS_CMD="zcat"
+            echo "Using standard gzip/zcat" >> {log}
+        fi
+        
+        # Process R1 files
+        echo "Processing R1 files..." >> {log}
+        TEMP_FILE=$(mktemp)
+        for file in {input.r1}; do
+            echo "Processing $(basename $file)" >> {log}
+            $DECOMPRESS_CMD "$file" >> $TEMP_FILE
+        done
+        $COMPRESS_CMD -1 < $TEMP_FILE > {output.r1}
+        rm -f $TEMP_FILE
+        
+        # Process R2 files
+        echo "Processing R2 files..." >> {log}
+        TEMP_FILE=$(mktemp)
+        for file in {input.r2}; do
+            echo "Processing $(basename $file)" >> {log}
+            $DECOMPRESS_CMD "$file" >> $TEMP_FILE
+        done
+        $COMPRESS_CMD -1 < $TEMP_FILE > {output.r2}
+        rm -f $TEMP_FILE
         """
 
 rule check_pairs:
@@ -87,7 +118,14 @@ rule check_pairs:
         mem = slurm_config["pair_check"]["mem"]
     shell:
         """
-        bbmap/repair.sh in1={input.r1} in2={input.r2} out1={output.r1} out2={output.r2} 2>> {log}
+        # Create output directory
+        mkdir -p $(dirname {output.r1})
+        
+        # Run repair.sh with appropriate parameters
+        repair.sh in1={input.r1} in2={input.r2} \
+            out1={output.r1} out2={output.r2} \
+            overwrite=t tossbrokenreads=t repair=t \
+            showspeed=t threads={resources.cpus} 2>> {log}
         """
 
 rule normalize_bbnorm:
@@ -108,8 +146,16 @@ rule normalize_bbnorm:
         mem = slurm_config["bbnorm"]["mem"]
     shell:
         """
-        bbnorm.sh in={input.r1} in2={input.r2} out={output.r1} out2={output.r2} \
-                  target=100 min=5 threads={resources.cpus} 2>> {log}
+        # Create output directory
+        mkdir -p $(dirname {output.r1})
+        
+        # Create histogram file
+        HIST_FILE=$(dirname {log})/kmer_histogram.txt
+        
+        bbnorm.sh in1={input.r1} in2={input.r2} \
+            out1={output.r1} out2={output.r2} \
+            hist=$HIST_FILE target=100 min=5 \
+            threads={resources.cpus} ecc=t prefilter=t 2>> {log}
         """
 
 rule normalize_trinity:
@@ -132,12 +178,32 @@ rule normalize_trinity:
         mem = slurm_config["trinity_norm"]["mem"]
     shell:
         """
-        Trinity --seqType fq --JM {resources.mem} --max_cov 100 \
-                --left {input.r1} --right {input.r2} --pairs_together \
-                --PARALLEL_STATS --CPU {resources.cpus} --output {params.temp_dir}/trinity_norm_tmp
-        gzip -c {params.temp_dir}/trinity_norm_tmp/left.norm.fq > {output.r1}
-        gzip -c {params.temp_dir}/trinity_norm_tmp/right.norm.fq > {output.r2}
-        rm -rf {params.temp_dir}/trinity_norm_tmp
+        # Create output directory and temp directory
+        mkdir -p $(dirname {output.r1})
+        
+        # Create temporary directory for Trinity
+        TEMP_DIR="{params.temp_dir}/trinity_norm_tmp"
+        mkdir -p $TEMP_DIR
+        
+        # Run Trinity normalization
+        insilico_read_normalization.pl \
+            --seqType fq \
+            --JM {resources.mem}G \
+            --max_cov 100 \
+            --left {input.r1} \
+            --right {input.r2} \
+            --pairs_together \
+            --PARALLEL_STATS \
+            --CPU {resources.cpus} \
+            --output $TEMP_DIR \
+            2>> {log}
+        
+        # Compress the normalized files
+        gzip -c $TEMP_DIR/left.norm.fq > {output.r1}
+        gzip -c $TEMP_DIR/right.norm.fq > {output.r2}
+        
+        # Clean up temporary files
+        rm -rf $TEMP_DIR
         """
 
 rule assemble:
@@ -159,8 +225,27 @@ rule assemble:
         mem = slurm_config["assembly"]["mem"]
     shell:
         """
-        rnaspades.py --rna -1 {input.r1} -2 {input.r2} -o {params.output_dir} \
-                     -t {resources.cpus} -m {resources.mem} 2>> {log}
+        # Create output directory
+        mkdir -p {params.output_dir}
+        
+        # Set up temporary directory
+        TMP="${{TMPDIR:-$HOME/tmp}}"
+        mkdir -p $TMP
+        export TMPDIR=$TMP
+        
+        # Calculate memory in GB (take 95% of available memory)
+        MEM_GB=$(echo {resources.mem} | sed 's/G//')
+        SPADES_MEM=$((MEM_GB * 95 / 100))
+        
+        # Run rnaSPAdes with appropriate parameters
+        rnaspades.py \
+            --rna \
+            -1 {input.r1} \
+            -2 {input.r2} \
+            -o {params.output_dir} \
+            -t {resources.cpus} \
+            -m $SPADES_MEM \
+            2>> {log}
         """
 
 rule busco:
@@ -181,6 +266,29 @@ rule busco:
         mem = slurm_config["busco"]["mem"]
     shell:
         """
-        busco -i {input} -o {wildcards.norm} -l diptera_odb10 -m transcriptome \
-              -c {resources.cpus} --out_path {params.output_dir} 2>> {log}
+        # Create output directory
+        mkdir -p {params.output_dir}
+        
+        # Check if input is gzipped and decompress if needed
+        UNZIPPED_TRANSCRIPTOME="{input}"
+        if [[ "{input}" == *.gz ]]; then
+            echo "Input transcriptome is gzipped. Decompressing before BUSCO analysis..." >> {log}
+            UNZIPPED_TRANSCRIPTOME=$(mktemp --suffix=.fasta)
+            gunzip -c "{input}" > "$UNZIPPED_TRANSCRIPTOME"
+        fi
+        
+        # Run BUSCO
+        busco \
+            -i $UNZIPPED_TRANSCRIPTOME \
+            -o {wildcards.norm} \
+            -l diptera_odb10 \
+            -m transcriptome \
+            -c {resources.cpus} \
+            --out_path {params.output_dir} \
+            2>> {log}
+        
+        # Clean up decompressed file if we created one
+        if [[ "{input}" == *.gz && "$UNZIPPED_TRANSCRIPTOME" != "{input}" ]]; then
+            rm -f "$UNZIPPED_TRANSCRIPTOME"
+        fi
         """
