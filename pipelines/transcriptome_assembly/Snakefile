@@ -27,10 +27,24 @@ rule trim_reads:
         mem = slurm_config["trimming"]["mem"]
     shell:
         """
-        trimmomatic PE -threads {resources.cpus} {input.r1} {input.r2} \
-            {output.r1} /dev/null {output.r2} /dev/null \
-            ILLUMINACLIP:adapters/TruSeq3-PE.fa:2:30:10 \
-            LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36 2> {log}
+        # Create output directories
+        mkdir -p $(dirname {output.r1})
+        mkdir -p $(dirname {output.html})
+        
+        # Run fastp with appropriate parameters (matching bin/01_trimming.sh)
+        fastp \
+            -i {input.r1} \
+            -I {input.r2} \
+            -o {output.r1} \
+            -O {output.r2} \
+            --html {output.html} \
+            --json {output.json} \
+            --detect_adapter_for_pe \
+            --dedup \
+            -w {resources.cpus} \
+            -q 20 \
+            --compression 6 \
+            2> {log}
         """
 
 rule merge_reads:
