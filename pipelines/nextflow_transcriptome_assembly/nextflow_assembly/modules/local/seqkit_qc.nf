@@ -12,22 +12,40 @@ process SEQKIT_QC {
     tuple val(sample_id), path("${sample_id}_clean_R{1,2}.fastq.gz"), emit: cleaned_reads
 
     script:
+    def read1 = reads[0]
+    def read2 = reads[1]
     """
-    # Run seqkit sana on R1
-    seqkit sana -j ${task.cpus} ${reads[0]} -o ${sample_id}_sana_R1.fastq.gz
-
-    # Run seqkit sana on R2
-    seqkit sana -j ${task.cpus} ${reads[1]} -o ${sample_id}_sana_R2.fastq.gz
-
-    # Create temporary output directory for paired reads
-    mkdir -p paired_output
-
-    # Run seqkit pair on sana outputs - using -O for output directory
-    seqkit pair -j ${task.cpus} -1 ${sample_id}_sana_R1.fastq.gz -2 ${sample_id}_sana_R2.fastq.gz \
-        -O paired_output -u
-
-    # Rename the outputs to our desired filenames
-    mv paired_output/${sample_id}_sana_R1.fastq.gz ${sample_id}_clean_R1.fastq.gz
-    mv paired_output/${sample_id}_sana_R2.fastq.gz ${sample_id}_clean_R2.fastq.gz
+    echo "=== STARTING SEQKIT_QC PROCESS v2 ==="
+    echo "Working directory: \$(pwd)"
+    echo "Files available:"
+    ls -la
+    echo "Sample ID: ${sample_id}"
+    echo "Read1: ${read1}"
+    echo "Read2: ${read2}"
+    
+    # Create output directory
+    mkdir -p temp
+    
+    # Process R1
+    echo "Processing R1..."
+    seqkit sana -j ${task.cpus} -o temp/r1_sana.fastq.gz "${read1}"
+    
+    # Process R2
+    echo "Processing R2..."
+    seqkit sana -j ${task.cpus} -o temp/r2_sana.fastq.gz "${read2}"
+    
+    # Pair reads
+    echo "Pairing reads..."
+    mkdir -p temp/paired
+    seqkit pair -j ${task.cpus} -1 temp/r1_sana.fastq.gz -2 temp/r2_sana.fastq.gz -O temp/paired -u
+    
+    # Rename outputs
+    echo "Generating final outputs..."
+    mv temp/paired/r1_sana.fastq.gz "${sample_id}_clean_R1.fastq.gz"
+    mv temp/paired/r2_sana.fastq.gz "${sample_id}_clean_R2.fastq.gz"
+    
+    # Cleanup
+    rm -rf temp
+    echo "=== SEQKIT_QC PROCESS COMPLETED ==="
     """
 } 

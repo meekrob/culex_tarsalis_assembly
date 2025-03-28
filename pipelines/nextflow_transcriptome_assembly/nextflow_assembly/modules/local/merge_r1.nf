@@ -12,7 +12,20 @@ process MERGE_R1 {
 
     script:
     """
-    # Simple cat merge with compression
-    cat ${cleaned_reads_r1} > merged_R1.fastq.gz
+    # Create temporary file for merging
+    touch temp_R1.fastq.gz
+    
+    # Merge files with error checking
+    for file in ${cleaned_reads_r1}; do
+        if [ -f "\$file" ]; then
+            cat "\$file" >> temp_R1.fastq.gz
+        else
+            echo "Error: File \$file not found" >&2
+            exit 1
+        fi
+    done
+    
+    # Move to final output
+    mv temp_R1.fastq.gz merged_R1.fastq.gz
     """
 } 

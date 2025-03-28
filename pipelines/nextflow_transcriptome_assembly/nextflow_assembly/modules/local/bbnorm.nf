@@ -48,6 +48,7 @@ process BBNORM {
         -Xmx${task.memory.toGiga()-10}g \\
         -eoom \\
         -da \\
-        overwrite=t
+        overwrite=t \\
+        tmpdir="/nfs/home/jlamb/Projects/temp"
     """
 } 

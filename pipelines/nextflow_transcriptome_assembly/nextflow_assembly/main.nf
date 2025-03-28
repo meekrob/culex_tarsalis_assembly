@@ -97,8 +97,12 @@ workflow {
         MERGE_R1(all_r1_files)
         MERGE_R2(all_r2_files)
         
-        // Set the merged reads for normalization
-        merged_reads_ch = tuple(MERGE_R1.out.merged_r1, MERGE_R2.out.merged_r2)
+        // Create direct inputs for BBNORM
+        r1_ch = MERGE_R1.out.merged_r1
+        r2_ch = MERGE_R2.out.merged_r2
+        
+        // Combine channels into a tuple
+        r1_ch.combine(r2_ch).map { r1, r2 -> [r1, r2] }.set { merged_reads_ch }
     }
     else {
         // If skipping to merged files
@@ -108,6 +112,7 @@ workflow {
                 "${params.outdir}/merging/merged_R2.fastq.gz"
             ])
             .collect()
+            .map { files -> [files[0], files[1]] }
             .set { merged_reads_ch }
             
         log.info "Skipping trimming and merging. Using existing files in ${params.outdir}/merging"
