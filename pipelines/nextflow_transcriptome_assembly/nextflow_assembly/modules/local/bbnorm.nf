@@ -14,6 +14,9 @@ process BBNORM {
 
     script:
     """
+    # Create temporary directory if it doesn't exist
+    mkdir -p ${params.temp_dir}
+    
     bbnorm.sh \\
         in1=${left} \\
         in2=${right} \\
@@ -49,6 +52,6 @@ process BBNORM {
         -eoom \\
         -da \\
         overwrite=t \\
-        tmpdir="/nfs/home/jlamb/Projects/temp"
+        tmpdir="${params.temp_dir}"
     """
 } 

@@ -60,4 +60,5 @@ sample_id    /path/to/R1.fastq.gz    /path/to/R2.fastq.gz
 | `--outdir` | Output directory for results | `./results` |
 | `--kmer_size` | k-mer size for normalization | `25` |
 | `--target_depth` | Normalization target depth | `100` |
+| `--temp_dir` | Directory for temporary files | `./temp` |
 | `--assembler` | Assembly method (rnaspades or trinity) | `rnaspades` |
